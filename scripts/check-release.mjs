@@ -1,0 +1,119 @@
+#!/usr/bin/env node
+// Proves the packages work for someone who only has npm: packs each workspace package (after `pnpm build`), audits
+// the tarballs, installs them into a clean project OUTSIDE this repository, with AppPort and Distribution Protocol
+// resolved from the registry at the versions the manifests declare, and runs a consumer against the installed copies.
+// Nothing is linked from the workspace, and no repository source is imported.
+//
+//   node scripts/check-release.mjs [--keep <dir>]
+import { spawnSync } from "node:child_process";
+import { copyFileSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const keep = process.argv.includes("--keep") ? process.argv[process.argv.indexOf("--keep") + 1] : undefined;
+const scratch = keep ?? mkdtempSync(join(tmpdir(), "appworks-release-"));
+const run = (cmd, args, options = {}) => {
+  const r = spawnSync(cmd, args, { encoding: "utf8", ...options });
+  if (r.status !== 0) {
+    console.error(`${cmd} ${args.join(" ")} failed (${r.status})\n${r.stdout ?? ""}\n${r.stderr ?? ""}`);
+    process.exit(1);
+  }
+  return r;
+};
+const problems = [];
+
+// 1. Pack. pnpm rewrites workspace: dependencies to the concrete version.
+const tarballs = join(scratch, "tarballs");
+mkdirSync(tarballs, { recursive: true });
+const dirs = readdirSync(join(root, "packages")).map((d) => join(root, "packages", d));
+const manifests = {};
+for (const dir of dirs) {
+  const manifest = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
+  manifests[manifest.name] = manifest;
+  run("pnpm", ["pack", "--pack-destination", tarballs], { cwd: dir });
+}
+const files = readdirSync(tarballs).filter((f) => f.endsWith(".tgz")).map((f) => join(tarballs, f));
+
+// 2. Audit contents: built output, shipped schemas and README only; no sources, tests or unresolved workspace specs.
+for (const file of files) {
+  const list = run("tar", ["-tzf", file]).stdout.trim().split("\n");
+  const extracted = join(scratch, "audit", file.split(sep).pop());
+  mkdirSync(extracted, { recursive: true });
+  run("tar", ["-xzf", file, "-C", extracted]);
+  const packed = JSON.parse(readFileSync(join(extracted, "package", "package.json"), "utf8"));
+  for (const entry of list) {
+    const path = entry.replace(/^package\//, "");
+    if (!/^(dist\/|schemas\/|README\.md$|package\.json$)/.test(path)) problems.push(`${packed.name}: unexpected file ${path}`);
+    if (/\.test\.|\/test\/|\/src\//.test(path)) problems.push(`${packed.name}: ships ${path}`);
+  }
+  if (!list.includes("package/dist/index.js") || !list.includes("package/dist/index.d.ts")) problems.push(`${packed.name}: missing dist/index.js or dist/index.d.ts`);
+  for (const [name, spec] of Object.entries(packed.dependencies ?? {})) if (/^(workspace:|link:|file:)/.test(spec)) problems.push(`${packed.name}: dependency ${name}@${spec} is not publishable`);
+}
+if (problems.length) {
+  console.error(`tarball audit failed:\n- ${problems.join("\n- ")}`);
+  process.exit(1);
+}
+console.log(`Packed and audited ${files.length} tarballs`);
+
+// 3. Install into a clean project outside the repository.
+const project = join(scratch, "project");
+mkdirSync(project, { recursive: true });
+writeFileSync(join(project, "package.json"), JSON.stringify({ name: "appworks-installed-consumer", version: "0.0.0", private: true, type: "module" }, null, 2));
+const env = { ...process.env, npm_config_cache: join(scratch, "npm-cache") };
+run("npm", ["install", "--no-audit", "--no-fund", "--loglevel=error", ...files], { cwd: project, env });
+for (const name of Object.keys(manifests)) {
+  const installed = join(project, "node_modules", name);
+  if (lstatSync(installed).isSymbolicLink() || realpathSync(installed).startsWith(root + sep)) {
+    console.error(`${name} is linked into the repository: this is not an install`);
+    process.exit(1);
+  }
+}
+const recipeManifest = manifests["@appport/recipe"];
+for (const [name, version] of Object.entries(recipeManifest.dependencies)) {
+  const installed = JSON.parse(readFileSync(join(project, "node_modules", name, "package.json"), "utf8")).version;
+  if (installed !== version) {
+    console.error(`${name}: installed ${installed}, the manifest declares ${version}`);
+    process.exit(1);
+  }
+}
+console.log(`Installed ${Object.keys(manifests).length} real packages, with @appport/{protocol,schema,integration} from the registry`);
+
+// 4. A consumer that knows only the public exports.
+copyFileSync(join(root, "examples", "supplier-invoice", "recipe.json"), join(project, "recipe.json"));
+writeFileSync(join(project, "consumer.mjs"), `
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import * as recipe from "@appport/recipe";
+import * as distribution from "@appport/recipe-distribution";
+import { fromJSONSchema } from "@appport/schema";
+const check = (ok, message) => { if (!ok) { console.error("FAIL", message); process.exit(1); } console.log("  ok ", message); };
+const source = JSON.parse(readFileSync("recipe.json", "utf8"));
+check(recipe.RECIPE_FORMAT === "appport.recipe/1" && recipe.RECIPE_PACKAGE_BINDING_SCHEME === "appport/recipe-package/1", "formats are exported");
+const result = recipe.validateRecipe(source);
+check(result.ok && result.findings.length === 0, "the supplier-invoice example is valid source");
+const env = recipe.validateRecipe(source, {});
+check(env.sourceOk && env.findings.length === 3 && env.findings.every((f) => f.code === "ENV_CONTRACT_UNAVAILABLE" && f.scope === "environment"), "its unresolved contract is reported as three environment findings");
+check(recipe.validateRecipe({ ...source, format: "appport.recipe/2" }).findings[0].code === "RECIPE_FORMAT", "an unsupported format version is refused");
+check(recipe.evaluateExpression({ op: "gt", args: [{ ref: "/input/amount" }, { value: 10000 }] }, { input: { amount: 25000 } }) === true, "expressions evaluate");
+const require = createRequire(import.meta.url);
+const schema = JSON.parse(readFileSync(require.resolve("@appport/recipe/package.json").replace(/package\\.json$/, "schemas/recipe.schema.json"), "utf8"));
+check(fromJSONSchema(schema).validate(source).ok, "the shipped recipe schema validates the example");
+const refused = recipe.loadRecipePackage(JSON.stringify({ format: "appport.recipe-package/1", kind: "compiled" }));
+check(!refused.ok && refused.executable === false && refused.findings[0].code === "PACKAGE_KIND_UNSUPPORTED", "a compiled package is refused, and nothing is executable");
+check(distribution.DISTRIBUTION_PROTOCOL === "distribution/1" && typeof distribution.acceptAcquiredRecipePackage === "function", "the distribution boundary is exported");
+`);
+const consumer = run("node", ["consumer.mjs"], { cwd: project });
+process.stdout.write(consumer.stdout);
+
+// 5. TypeScript consumers get the declarations.
+writeFileSync(join(project, "types.ts"), `import { validateRecipe, type RecipeSource, type RecipeValidation } from "@appport/recipe";
+import { acceptAcquiredRecipePackage, type RecipePackageAcceptance } from "@appport/recipe-distribution";
+export const v: (s: RecipeSource) => RecipeValidation = (s) => validateRecipe(s);
+export type A = RecipePackageAcceptance; export const a = acceptAcquiredRecipePackage;
+`);
+writeFileSync(join(project, "tsconfig.json"), JSON.stringify({ compilerOptions: { module: "NodeNext", moduleResolution: "NodeNext", target: "ES2022", strict: true, noEmit: true, skipLibCheck: false, types: [] }, files: ["types.ts"] }));
+run(join(root, "node_modules", ".bin", "tsc"), ["-p", "tsconfig.json"], { cwd: project });
+console.log("  ok  the public declarations typecheck in a consumer project");
+console.log(`\nRelease check passed (${project})`);

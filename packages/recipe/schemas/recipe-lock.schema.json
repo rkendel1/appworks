@@ -1,0 +1,248 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://appport.dev/schemas/appport/1/recipe-lock.schema.json",
+  "title": "AppPort recipe dependency lock",
+  "description": "appport.recipe-lock/1: the canonical revisions a recipe's dependencies were checked against and, optionally, the providers one environment resolved them to. A lock grants no authority. See spec/recipe-1.md \u00a75.",
+  "type": "object",
+  "properties": {
+    "format": {
+      "const": "appport.recipe-lock/1"
+    },
+    "recipe": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]*(\\.[a-z0-9][a-z0-9-]*)+$",
+          "maxLength": 190
+        },
+        "requires": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "id",
+        "requires"
+      ],
+      "additionalProperties": false
+    },
+    "dependencies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "declared": {
+            "$ref": "#/$defs/dependency"
+          },
+          "canonical": {
+            "$ref": "#/$defs/canonical"
+          },
+          "resolution": {
+            "$ref": "#/$defs/resolution"
+          }
+        },
+        "required": [
+          "id",
+          "declared",
+          "canonical"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "format",
+    "recipe",
+    "dependencies"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "canonical": {
+      "type": "object",
+      "properties": {
+        "contract": {
+          "type": "string",
+          "minLength": 1
+        },
+        "contractDigest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "capability": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "capabilityDigest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "contract",
+        "contractDigest",
+        "capability",
+        "version",
+        "capabilityDigest"
+      ],
+      "additionalProperties": false,
+      "description": "Portable: the same in every environment holding this contract revision."
+    },
+    "resolution": {
+      "type": "object",
+      "properties": {
+        "provider": {
+          "type": "object",
+          "properties": {
+            "application": {
+              "type": "string",
+              "minLength": 1
+            },
+            "capability": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "version": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              },
+              "required": [
+                "name",
+                "version"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "application",
+            "capability"
+          ],
+          "additionalProperties": false
+        },
+        "registration": {
+          "type": "object",
+          "properties": {
+            "registrationId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "fingerprint": {
+              "type": "string",
+              "minLength": 1
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "required": [
+            "registrationId",
+            "fingerprint",
+            "revision"
+          ],
+          "additionalProperties": false
+        },
+        "contractRevision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "fulfillment": {
+          "type": "object",
+          "properties": {
+            "claim": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            "status": {
+              "const": "valid"
+            },
+            "compatible": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "claim",
+            "status",
+            "compatible"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "provider",
+        "registration",
+        "contractRevision",
+        "fulfillment"
+      ],
+      "additionalProperties": false,
+      "description": "Environment-specific: meaningless in another environment, and never carried by a package."
+    },
+    "dependency": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relationship": {
+          "enum": [
+            "invokes",
+            "observes"
+          ]
+        },
+        "target": {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "type": "string",
+              "minLength": 1
+            },
+            "capability": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9]*(\\.[a-z][a-z0-9]*)+(@[1-9][0-9]*)?$"
+            },
+            "provider": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "contract",
+            "capability"
+          ],
+          "additionalProperties": false
+        },
+        "required": {
+          "const": true
+        },
+        "versionConstraint": {
+          "type": "string",
+          "pattern": "^(\\^|~|>=|>|<=|<)?\\d+(\\.\\d+)*$"
+        },
+        "purpose": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "relationship",
+        "target",
+        "required"
+      ],
+      "additionalProperties": false,
+      "description": "A spec/dependencies-1.md dependency with a canonical target. Recipes never depend on an application's own capability."
+    }
+  }
+}

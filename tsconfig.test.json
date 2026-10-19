@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "composite": false,
+    "incremental": false,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "rootDir": ".",
+    "paths": {
+      "@appport/recipe": ["./packages/recipe/src/index.ts"],
+      "@appport/recipe-distribution": ["./packages/recipe-distribution/src/index.ts"]
+    }
+  },
+  "include": ["packages/*/test/**/*.ts", "packages/*/src/**/*.ts"]
+}

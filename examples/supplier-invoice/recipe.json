@@ -1,0 +1,768 @@
+{
+  "format": "appport.recipe/1",
+  "id": "org.example.recipes.supplier-invoice",
+  "name": "Supplier invoice processing",
+  "description": "Illustrative. The canonical contract org.example.accounting is not published, and nothing in this repository implements or registers it: every dependency below is unresolved until an environment supplies that contract and an eligible provider.",
+  "objective": "Record a valid, non-duplicate supplier invoice in the ledger, with human approval where policy requires it, and confirm independently that the ledger holds it.",
+  "inputs": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "supplierId",
+      "invoiceNumber",
+      "amount",
+      "currency",
+      "dueDate"
+    ],
+    "properties": {
+      "supplierId": {
+        "type": "string",
+        "minLength": 1,
+        "x-appport-concept": "https://vocab.example.org/finance#supplier-id"
+      },
+      "invoiceNumber": {
+        "type": "string",
+        "minLength": 1,
+        "x-appport-concept": "https://vocab.example.org/finance#invoice-number"
+      },
+      "amount": {
+        "type": "number",
+        "x-appport-concept": "https://vocab.example.org/finance#invoice-amount"
+      },
+      "currency": {
+        "type": "string",
+        "enum": [
+          "EUR",
+          "USD",
+          "GBP"
+        ],
+        "x-appport-concept": "https://vocab.example.org/finance#currency"
+      },
+      "dueDate": {
+        "type": "string",
+        "format": "date",
+        "x-appport-concept": "https://vocab.example.org/finance#due-date"
+      },
+      "purchaseOrder": {
+        "type": "string",
+        "minLength": 1,
+        "x-appport-concept": "https://vocab.example.org/finance#purchase-order-number"
+      }
+    }
+  },
+  "outputs": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "invoiceId",
+      "status",
+      "approval"
+    ],
+    "properties": {
+      "invoiceId": {
+        "type": "string",
+        "minLength": 1,
+        "x-appport-concept": "https://vocab.example.org/finance#invoice-id"
+      },
+      "status": {
+        "type": "string",
+        "enum": [
+          "submitted",
+          "rejected"
+        ],
+        "x-appport-concept": "https://vocab.example.org/finance#invoice-status"
+      },
+      "approval": {
+        "type": "string",
+        "enum": [
+          "automatic",
+          "approved"
+        ]
+      }
+    }
+  },
+  "outcome": {
+    "description": "The supplier invoice is recorded in the ledger exactly once.",
+    "effects": [
+      {
+        "type": "https://vocab.example.org/finance#invoice-recorded"
+      }
+    ],
+    "verify": [
+      {
+        "id": "ledger-holds-invoice",
+        "kind": "state",
+        "via": {
+          "uses": "get-invoice",
+          "input": {
+            "invoiceId": {
+              "$output": "/invoiceId"
+            }
+          }
+        },
+        "expect": [
+          {
+            "at": "/invoiceNumber",
+            "equals": {
+              "$input": "/invoiceNumber"
+            }
+          },
+          {
+            "at": "/status",
+            "equals": "submitted"
+          }
+        ]
+      }
+    ]
+  },
+  "requires": [
+    {
+      "id": "find-duplicate",
+      "relationship": "observes",
+      "target": {
+        "contract": "org.example.accounting",
+        "capability": "invoice.duplicate"
+      },
+      "required": true,
+      "versionConstraint": "^1",
+      "purpose": "Look up an existing invoice with the same supplier and number"
+    },
+    {
+      "id": "submit-invoice",
+      "relationship": "invokes",
+      "target": {
+        "contract": "org.example.accounting",
+        "capability": "invoice.submit"
+      },
+      "required": true,
+      "versionConstraint": "^1",
+      "purpose": "Record the invoice in the ledger"
+    },
+    {
+      "id": "get-invoice",
+      "relationship": "observes",
+      "target": {
+        "contract": "org.example.accounting",
+        "capability": "invoice.get"
+      },
+      "required": true,
+      "versionConstraint": "^1",
+      "purpose": "Read the recorded invoice back to verify it"
+    }
+  ],
+  "start": "validate-fields",
+  "steps": [
+    {
+      "id": "validate-fields",
+      "kind": "decision",
+      "description": "Business validation beyond the input schema.",
+      "cases": [
+        {
+          "when": {
+            "op": "le",
+            "args": [
+              {
+                "ref": "/input/amount"
+              },
+              {
+                "value": 0
+              }
+            ]
+          },
+          "next": "reject-invalid"
+        }
+      ],
+      "otherwise": "check-duplicate"
+    },
+    {
+      "id": "check-duplicate",
+      "kind": "capability",
+      "uses": "find-duplicate",
+      "effect": "observation",
+      "expects": {
+        "input": {
+          "type": "object",
+          "required": [
+            "supplierId",
+            "invoiceNumber"
+          ],
+          "properties": {
+            "supplierId": {
+              "type": "string",
+              "minLength": 1,
+              "x-appport-concept": "https://vocab.example.org/finance#supplier-id"
+            },
+            "invoiceNumber": {
+              "type": "string",
+              "minLength": 1,
+              "x-appport-concept": "https://vocab.example.org/finance#invoice-number"
+            }
+          }
+        },
+        "output": {
+          "type": "object",
+          "required": [
+            "duplicate"
+          ],
+          "properties": {
+            "duplicate": {
+              "type": "boolean"
+            },
+            "invoiceId": {
+              "type": "string",
+              "minLength": 1,
+              "x-appport-concept": "https://vocab.example.org/finance#invoice-id"
+            }
+          }
+        }
+      },
+      "input": [
+        {
+          "op": "copy",
+          "from": "/input/supplierId",
+          "to": "/supplierId"
+        },
+        {
+          "op": "copy",
+          "from": "/input/invoiceNumber",
+          "to": "/invoiceNumber"
+        }
+      ],
+      "on": {
+        "success": "is-duplicate",
+        "failure": "lookup-failed"
+      }
+    },
+    {
+      "id": "is-duplicate",
+      "kind": "decision",
+      "cases": [
+        {
+          "when": {
+            "op": "eq",
+            "args": [
+              {
+                "ref": "/steps/check-duplicate/output/duplicate"
+              },
+              {
+                "value": true
+              }
+            ]
+          },
+          "next": "reject-duplicate"
+        }
+      ],
+      "otherwise": "needs-approval"
+    },
+    {
+      "id": "needs-approval",
+      "kind": "decision",
+      "description": "Approval is required above 10000, or without a purchase order.",
+      "cases": [
+        {
+          "when": {
+            "op": "or",
+            "args": [
+              {
+                "op": "gt",
+                "args": [
+                  {
+                    "ref": "/input/amount"
+                  },
+                  {
+                    "value": 10000
+                  }
+                ]
+              },
+              {
+                "op": "not",
+                "args": [
+                  {
+                    "op": "exists",
+                    "args": [
+                      {
+                        "ref": "/input/purchaseOrder"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          "next": "request-approval"
+        }
+      ],
+      "otherwise": "submit"
+    },
+    {
+      "id": "request-approval",
+      "kind": "task",
+      "purpose": "Approve or reject a supplier invoice that policy does not allow to be submitted automatically.",
+      "assignee": {
+        "role": "role:ap-manager"
+      },
+      "approval": true,
+      "present": [
+        {
+          "label": "Supplier",
+          "value": "/input/supplierId"
+        },
+        {
+          "label": "Invoice number",
+          "value": "/input/invoiceNumber"
+        },
+        {
+          "label": "Amount",
+          "value": "/input/amount"
+        },
+        {
+          "label": "Currency",
+          "value": "/input/currency"
+        },
+        {
+          "label": "Purchase order",
+          "value": "/input/purchaseOrder"
+        }
+      ],
+      "response": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "decision"
+        ],
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "approved",
+              "rejected"
+            ]
+          },
+          "comment": {
+            "type": "string"
+          }
+        }
+      },
+      "cases": [
+        {
+          "when": {
+            "op": "eq",
+            "args": [
+              {
+                "ref": "/steps/request-approval/output/decision"
+              },
+              {
+                "value": "approved"
+              }
+            ]
+          },
+          "next": "submit-approved"
+        }
+      ],
+      "otherwise": "rejected-by-approver",
+      "unanswered": "approval-unanswered"
+    },
+    {
+      "id": "submit",
+      "kind": "capability",
+      "description": "Submit the invoice through the canonical accounting capability.",
+      "uses": "submit-invoice",
+      "effect": "consequential",
+      "expects": {
+        "input": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "supplierId",
+            "invoiceNumber",
+            "amount",
+            "currency",
+            "dueDate"
+          ],
+          "properties": {
+            "supplierId": {
+              "type": "string",
+              "minLength": 1,
+              "x-appport-concept": "https://vocab.example.org/finance#supplier-id"
+            },
+            "invoiceNumber": {
+              "type": "string",
+              "minLength": 1,
+              "x-appport-concept": "https://vocab.example.org/finance#invoice-number"
+            },
+            "amount": {
+              "type": "number",
+              "x-appport-concept": "https://vocab.example.org/finance#invoice-amount"
+            },
+            "currency": {
+              "type": "string",
+              "enum": [
+                "EUR",
+                "USD",
+                "GBP"
+              ],
+              "x-appport-concept": "https://vocab.example.org/finance#currency"
+            },
+            "dueDate": {
+              "type": "string",
+              "format": "date",
+              "x-appport-concept": "https://vocab.example.org/finance#due-date"
+            },
+            "purchaseOrder": {
+              "type": "string",
+              "minLength": 1,
+              "x-appport-concept": "https://vocab.example.org/finance#purchase-order-number"
+            },
+            "approvalNote": {
+              "type": "string"
+            }
+          }
+        },
+        "output": {
+          "type": "object",
+          "required": [
+            "invoiceId",
+            "status"
+          ],
+          "properties": {
+            "invoiceId": {
+              "type": "string",
+              "minLength": 1,
+              "x-appport-concept": "https://vocab.example.org/finance#invoice-id"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "submitted",
+                "rejected"
+              ],
+              "x-appport-concept": "https://vocab.example.org/finance#invoice-status"
+            }
+          }
+        }
+      },
+      "input": [
+        {
+          "op": "copy",
+          "from": "/input/supplierId",
+          "to": "/supplierId"
+        },
+        {
+          "op": "copy",
+          "from": "/input/invoiceNumber",
+          "to": "/invoiceNumber"
+        },
+        {
+          "op": "copy",
+          "from": "/input/amount",
+          "to": "/amount"
+        },
+        {
+          "op": "copy",
+          "from": "/input/currency",
+          "to": "/currency"
+        },
+        {
+          "op": "copy",
+          "from": "/input/dueDate",
+          "to": "/dueDate"
+        },
+        {
+          "op": "copy",
+          "from": "/input/purchaseOrder",
+          "to": "/purchaseOrder"
+        }
+      ],
+      "verify": {
+        "methods": [
+          "invoice-recorded"
+        ],
+        "additional": [
+          {
+            "id": "invoice-number-recorded",
+            "kind": "state",
+            "via": {
+              "uses": "get-invoice",
+              "input": {
+                "invoiceId": {
+                  "$output": "/invoiceId"
+                }
+              }
+            },
+            "expect": [
+              {
+                "at": "/invoiceNumber",
+                "equals": {
+                  "$input": "/invoiceNumber"
+                }
+              },
+              {
+                "at": "/supplierId",
+                "equals": {
+                  "$input": "/supplierId"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "on": {
+        "success": "submitted",
+        "failure": "submission-failed",
+        "uncertain": "submission-uncertain"
+      }
+    },
+    {
+      "id": "submit-approved",
+      "kind": "capability",
+      "description": "Submit the invoice through the canonical accounting capability.",
+      "uses": "submit-invoice",
+      "effect": "consequential",
+      "expects": {
+        "input": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "supplierId",
+            "invoiceNumber",
+            "amount",
+            "currency",
+            "dueDate"
+          ],
+          "properties": {
+            "supplierId": {
+              "type": "string",
+              "minLength": 1,
+              "x-appport-concept": "https://vocab.example.org/finance#supplier-id"
+            },
+            "invoiceNumber": {
+              "type": "string",
+              "minLength": 1,
+              "x-appport-concept": "https://vocab.example.org/finance#invoice-number"
+            },
+            "amount": {
+              "type": "number",
+              "x-appport-concept": "https://vocab.example.org/finance#invoice-amount"
+            },
+            "currency": {
+              "type": "string",
+              "enum": [
+                "EUR",
+                "USD",
+                "GBP"
+              ],
+              "x-appport-concept": "https://vocab.example.org/finance#currency"
+            },
+            "dueDate": {
+              "type": "string",
+              "format": "date",
+              "x-appport-concept": "https://vocab.example.org/finance#due-date"
+            },
+            "purchaseOrder": {
+              "type": "string",
+              "minLength": 1,
+              "x-appport-concept": "https://vocab.example.org/finance#purchase-order-number"
+            },
+            "approvalNote": {
+              "type": "string"
+            }
+          }
+        },
+        "output": {
+          "type": "object",
+          "required": [
+            "invoiceId",
+            "status"
+          ],
+          "properties": {
+            "invoiceId": {
+              "type": "string",
+              "minLength": 1,
+              "x-appport-concept": "https://vocab.example.org/finance#invoice-id"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "submitted",
+                "rejected"
+              ],
+              "x-appport-concept": "https://vocab.example.org/finance#invoice-status"
+            }
+          }
+        }
+      },
+      "input": [
+        {
+          "op": "copy",
+          "from": "/input/supplierId",
+          "to": "/supplierId"
+        },
+        {
+          "op": "copy",
+          "from": "/input/invoiceNumber",
+          "to": "/invoiceNumber"
+        },
+        {
+          "op": "copy",
+          "from": "/input/amount",
+          "to": "/amount"
+        },
+        {
+          "op": "copy",
+          "from": "/input/currency",
+          "to": "/currency"
+        },
+        {
+          "op": "copy",
+          "from": "/input/dueDate",
+          "to": "/dueDate"
+        },
+        {
+          "op": "copy",
+          "from": "/input/purchaseOrder",
+          "to": "/purchaseOrder"
+        },
+        {
+          "op": "copy",
+          "from": "/steps/request-approval/output/comment",
+          "to": "/approvalNote"
+        }
+      ],
+      "verify": {
+        "methods": [
+          "invoice-recorded"
+        ],
+        "additional": [
+          {
+            "id": "invoice-number-recorded",
+            "kind": "state",
+            "via": {
+              "uses": "get-invoice",
+              "input": {
+                "invoiceId": {
+                  "$output": "/invoiceId"
+                }
+              }
+            },
+            "expect": [
+              {
+                "at": "/invoiceNumber",
+                "equals": {
+                  "$input": "/invoiceNumber"
+                }
+              },
+              {
+                "at": "/supplierId",
+                "equals": {
+                  "$input": "/supplierId"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "on": {
+        "success": "submitted-approved",
+        "failure": "submission-failed",
+        "uncertain": "submission-uncertain"
+      },
+      "approval": {
+        "task": "request-approval"
+      }
+    },
+    {
+      "id": "submitted",
+      "kind": "end",
+      "outcome": "completed",
+      "output": [
+        {
+          "op": "copy",
+          "from": "/steps/submit/output/invoiceId",
+          "to": "/invoiceId"
+        },
+        {
+          "op": "copy",
+          "from": "/steps/submit/output/status",
+          "to": "/status"
+        },
+        {
+          "op": "const",
+          "to": "/approval",
+          "value": "automatic"
+        }
+      ]
+    },
+    {
+      "id": "submitted-approved",
+      "kind": "end",
+      "outcome": "completed",
+      "output": [
+        {
+          "op": "copy",
+          "from": "/steps/submit-approved/output/invoiceId",
+          "to": "/invoiceId"
+        },
+        {
+          "op": "copy",
+          "from": "/steps/submit-approved/output/status",
+          "to": "/status"
+        },
+        {
+          "op": "const",
+          "to": "/approval",
+          "value": "approved"
+        }
+      ]
+    },
+    {
+      "id": "reject-invalid",
+      "kind": "end",
+      "outcome": "rejected",
+      "description": "The invoice amount is not positive."
+    },
+    {
+      "id": "reject-duplicate",
+      "kind": "end",
+      "outcome": "rejected",
+      "description": "An invoice with this supplier and number already exists."
+    },
+    {
+      "id": "rejected-by-approver",
+      "kind": "end",
+      "outcome": "rejected"
+    },
+    {
+      "id": "approval-unanswered",
+      "kind": "end",
+      "outcome": "failed",
+      "description": "No approval was given; nothing was submitted."
+    },
+    {
+      "id": "lookup-failed",
+      "kind": "end",
+      "outcome": "failed",
+      "description": "The duplicate check could not run; nothing was submitted."
+    },
+    {
+      "id": "submission-failed",
+      "kind": "end",
+      "outcome": "failed",
+      "description": "The ledger refused the invoice; it was not recorded."
+    },
+    {
+      "id": "submission-uncertain",
+      "kind": "end",
+      "outcome": "uncertain",
+      "description": "The ledger may or may not have recorded the invoice. It must be reconciled before any resubmission."
+    }
+  ],
+  "provenance": {
+    "authors": [
+      "AppWorks examples"
+    ],
+    "source": {
+      "repository": "https://github.com/rkendel1/appworks",
+      "path": "examples/supplier-invoice/recipe.json"
+    }
+  }
+}

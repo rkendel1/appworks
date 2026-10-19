@@ -1,0 +1,136 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://appport.dev/schemas/appport/1/recipe-package.schema.json",
+  "title": "AppPort recipe package",
+  "description": "appport.recipe-package/1: one immutable recipe package. digest is the SHA-256 of the RFC 8785 canonical JSON of every other member. A source package is not executable; the compiled kind is reserved and refused. See spec/recipe-1.md \u00a76.",
+  "type": "object",
+  "properties": {
+    "format": {
+      "const": "appport.recipe-package/1"
+    },
+    "kind": {
+      "const": "source"
+    },
+    "recipe": {
+      "$ref": "https://appport.dev/schemas/appport/1/recipe.schema.json"
+    },
+    "lock": {
+      "allOf": [
+        {
+          "$ref": "https://appport.dev/schemas/appport/1/recipe-lock.schema.json"
+        }
+      ],
+      "description": "Portable: entries carry no resolution."
+    },
+    "contracts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "digest": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          }
+        },
+        "required": [
+          "id",
+          "digest"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "requirements": {
+      "type": "object",
+      "properties": {
+        "roles": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "required": [
+        "roles"
+      ],
+      "additionalProperties": false
+    },
+    "provenance": {
+      "type": "object",
+      "properties": {
+        "tool": {
+          "type": "string"
+        },
+        "authors": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "source": {
+          "type": "object",
+          "properties": {
+            "repository": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "revision": {
+              "type": "string"
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "validation": {
+      "type": "object",
+      "properties": {
+        "format": {
+          "const": "appport.recipe-validation/1"
+        },
+        "sourceOk": {
+          "const": true
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "required": [
+        "format",
+        "sourceOk",
+        "warnings"
+      ],
+      "additionalProperties": false,
+      "description": "Informational. A consumer validates again."
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    }
+  },
+  "required": [
+    "format",
+    "kind",
+    "recipe",
+    "lock",
+    "contracts",
+    "requirements",
+    "validation",
+    "digest"
+  ],
+  "additionalProperties": false
+}

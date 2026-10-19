@@ -1,0 +1,25 @@
+{
+  "name": "appworks",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "AppWorks: discover, package, compose and incrementally replace business functionality, on top of AppPort.",
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -b tsconfig.build.json",
+    "clean": "tsc -b tsconfig.build.json --clean",
+    "typecheck": "tsc -b tsconfig.build.json --pretty && tsc -p tsconfig.test.json",
+    "test": "vitest run",
+    "boundary:check": "node scripts/check-boundary.mjs",
+    "release:check": "node scripts/check-release.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2",
+    "vitest": "^3.2.6"
+  },
+  "repository": "https://github.com/rkendel1/appworks.git"
+}

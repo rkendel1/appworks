@@ -1,0 +1,954 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://appport.dev/schemas/appport/1/recipe.schema.json",
+  "title": "AppPort recipe source",
+  "description": "appport.recipe/1: a business process as structured source. Structure only: validateRecipe adds the reference, control-flow, type and dependency rules of spec/recipe-1.md \u00a74. A recipe executes nothing and grants no authority.",
+  "type": "object",
+  "properties": {
+    "format": {
+      "const": "appport.recipe/1"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(\\.[a-z0-9][a-z0-9-]*)+$",
+      "maxLength": 190
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "description": {
+      "type": "string"
+    },
+    "objective": {
+      "type": "string",
+      "minLength": 1
+    },
+    "inputs": {
+      "type": "object",
+      "description": "A JSON Schema (object), with optional x-appport-* semantic annotations."
+    },
+    "outputs": {
+      "type": "object",
+      "description": "A JSON Schema (object), with optional x-appport-* semantic annotations."
+    },
+    "outcome": {
+      "type": "object",
+      "properties": {
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "effects": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "verify": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/stateVerification"
+          }
+        }
+      },
+      "required": [
+        "description",
+        "verify"
+      ],
+      "additionalProperties": false
+    },
+    "requires": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/dependency"
+      }
+    },
+    "start": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,62}$"
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/step"
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "properties": {
+        "authors": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "source": {
+          "type": "object",
+          "properties": {
+            "repository": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "revision": {
+              "type": "string"
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "format",
+    "id",
+    "name",
+    "objective",
+    "inputs",
+    "outputs",
+    "outcome",
+    "requires",
+    "start",
+    "steps"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "step": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{0,62}$"
+            },
+            "kind": {
+              "const": "capability"
+            },
+            "description": {
+              "type": "string"
+            },
+            "uses": {
+              "type": "string",
+              "minLength": 1
+            },
+            "effect": {
+              "enum": [
+                "observation",
+                "consequential"
+              ]
+            },
+            "expects": {
+              "type": "object",
+              "properties": {
+                "input": {
+                  "type": "object",
+                  "description": "A JSON Schema (object), with optional x-appport-* semantic annotations."
+                },
+                "output": {
+                  "type": "object",
+                  "description": "A JSON Schema (object), with optional x-appport-* semantic annotations."
+                }
+              },
+              "required": [
+                "input",
+                "output"
+              ],
+              "additionalProperties": false
+            },
+            "input": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/rule"
+              }
+            },
+            "approval": {
+              "type": "object",
+              "properties": {
+                "task": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9-]{0,62}$"
+                }
+              },
+              "required": [
+                "task"
+              ],
+              "additionalProperties": false
+            },
+            "preconditions": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/precondition"
+              }
+            },
+            "verify": {
+              "type": "object",
+              "properties": {
+                "methods": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "additional": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/stateVerification"
+                  }
+                }
+              },
+              "required": [],
+              "additionalProperties": false
+            },
+            "on": {
+              "type": "object",
+              "properties": {
+                "success": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9-]{0,62}$"
+                },
+                "failure": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9-]{0,62}$"
+                },
+                "uncertain": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9-]{0,62}$"
+                }
+              },
+              "required": [
+                "success",
+                "failure"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "id",
+            "kind",
+            "uses",
+            "effect",
+            "expects",
+            "input",
+            "on"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{0,62}$"
+            },
+            "kind": {
+              "const": "decision"
+            },
+            "description": {
+              "type": "string"
+            },
+            "cases": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "when": {
+                    "$ref": "#/$defs/expression"
+                  },
+                  "next": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]{0,62}$"
+                  }
+                },
+                "required": [
+                  "when",
+                  "next"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 1
+            },
+            "otherwise": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{0,62}$"
+            }
+          },
+          "required": [
+            "id",
+            "kind",
+            "cases",
+            "otherwise"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{0,62}$"
+            },
+            "kind": {
+              "const": "transform"
+            },
+            "description": {
+              "type": "string"
+            },
+            "output": {
+              "type": "object",
+              "description": "A JSON Schema (object), with optional x-appport-* semantic annotations."
+            },
+            "rules": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/rule"
+              }
+            },
+            "next": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{0,62}$"
+            }
+          },
+          "required": [
+            "id",
+            "kind",
+            "output",
+            "rules",
+            "next"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{0,62}$"
+            },
+            "kind": {
+              "const": "task"
+            },
+            "description": {
+              "type": "string"
+            },
+            "purpose": {
+              "type": "string",
+              "minLength": 1
+            },
+            "assignee": {
+              "type": "object",
+              "properties": {
+                "role": {
+                  "type": "string",
+                  "pattern": "^\\S+$"
+                }
+              },
+              "required": [
+                "role"
+              ],
+              "additionalProperties": false
+            },
+            "approval": {
+              "type": "boolean"
+            },
+            "present": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "value": {
+                    "type": "string",
+                    "pattern": "^(/([^~/]|~[01])*)*$"
+                  }
+                },
+                "required": [
+                  "label",
+                  "value"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "response": {
+              "type": "object",
+              "description": "A JSON Schema (object), with optional x-appport-* semantic annotations."
+            },
+            "cases": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "when": {
+                    "$ref": "#/$defs/expression"
+                  },
+                  "next": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]{0,62}$"
+                  }
+                },
+                "required": [
+                  "when",
+                  "next"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "otherwise": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{0,62}$"
+            },
+            "unanswered": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{0,62}$"
+            }
+          },
+          "required": [
+            "id",
+            "kind",
+            "purpose",
+            "assignee",
+            "present",
+            "response",
+            "cases",
+            "otherwise",
+            "unanswered"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{0,62}$"
+            },
+            "kind": {
+              "const": "end"
+            },
+            "description": {
+              "type": "string"
+            },
+            "outcome": {
+              "enum": [
+                "completed",
+                "rejected",
+                "failed",
+                "uncertain"
+              ]
+            },
+            "output": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/rule"
+              }
+            }
+          },
+          "required": [
+            "id",
+            "kind",
+            "outcome"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "rule": {
+      "description": "An appport.mapping/1 rule (spec/mapping-1.md \u00a74) whose from pointers are recipe data pointers, or a compute rule.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "op": {
+              "const": "copy"
+            },
+            "from": {
+              "type": "string",
+              "pattern": "^(/([^~/]|~[01])*)*$"
+            },
+            "to": {
+              "type": "string",
+              "pattern": "^(/([^~/]|~[01])*)*$"
+            },
+            "default": {},
+            "conceptRelation": {
+              "enum": [
+                "exact",
+                "broader",
+                "narrower",
+                "related"
+              ]
+            }
+          },
+          "required": [
+            "op",
+            "from",
+            "to"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "op": {
+              "const": "const"
+            },
+            "to": {
+              "type": "string",
+              "pattern": "^(/([^~/]|~[01])*)*$"
+            },
+            "value": {},
+            "conceptRelation": {
+              "enum": [
+                "exact",
+                "broader",
+                "narrower",
+                "related"
+              ]
+            }
+          },
+          "required": [
+            "op",
+            "to",
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "op": {
+              "const": "enum"
+            },
+            "from": {
+              "type": "string",
+              "pattern": "^(/([^~/]|~[01])*)*$"
+            },
+            "to": {
+              "type": "string",
+              "pattern": "^(/([^~/]|~[01])*)*$"
+            },
+            "table": {
+              "type": "object"
+            },
+            "relation": {
+              "enum": [
+                "exact",
+                "broader",
+                "narrower",
+                "related"
+              ]
+            },
+            "unmapped": {
+              "enum": [
+                "reject",
+                "omit"
+              ]
+            },
+            "conceptRelation": {
+              "enum": [
+                "exact",
+                "broader",
+                "narrower",
+                "related"
+              ]
+            }
+          },
+          "required": [
+            "op",
+            "from",
+            "to",
+            "table",
+            "relation",
+            "unmapped"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "op": {
+              "const": "unit"
+            },
+            "from": {
+              "type": "string",
+              "pattern": "^(/([^~/]|~[01])*)*$"
+            },
+            "to": {
+              "type": "string",
+              "pattern": "^(/([^~/]|~[01])*)*$"
+            },
+            "fromUnit": {
+              "type": "string",
+              "minLength": 1
+            },
+            "toUnit": {
+              "type": "string",
+              "minLength": 1
+            },
+            "conceptRelation": {
+              "enum": [
+                "exact",
+                "broader",
+                "narrower",
+                "related"
+              ]
+            }
+          },
+          "required": [
+            "op",
+            "from",
+            "to",
+            "fromUnit",
+            "toUnit"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "op": {
+              "const": "encoding"
+            },
+            "from": {
+              "type": "string",
+              "pattern": "^(/([^~/]|~[01])*)*$"
+            },
+            "to": {
+              "type": "string",
+              "pattern": "^(/([^~/]|~[01])*)*$"
+            },
+            "fromEncoding": {
+              "enum": [
+                "iso8601",
+                "epoch-seconds",
+                "epoch-milliseconds"
+              ]
+            },
+            "toEncoding": {
+              "enum": [
+                "iso8601",
+                "epoch-seconds",
+                "epoch-milliseconds"
+              ]
+            },
+            "truncate": {
+              "type": "boolean"
+            },
+            "conceptRelation": {
+              "enum": [
+                "exact",
+                "broader",
+                "narrower",
+                "related"
+              ]
+            }
+          },
+          "required": [
+            "op",
+            "from",
+            "to",
+            "fromEncoding",
+            "toEncoding"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "op": {
+              "const": "compute"
+            },
+            "to": {
+              "type": "string",
+              "pattern": "^(/([^~/]|~[01])*)*$"
+            },
+            "expr": {
+              "$ref": "#/$defs/expression"
+            }
+          },
+          "required": [
+            "op",
+            "to",
+            "expr"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "expression": {
+      "description": "A literal, a recipe data reference, or an operator over expressions (spec/recipe-1.md \u00a73.4).",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "value": {
+              "oneOf": [
+                {
+                  "type": [
+                    "string",
+                    "number",
+                    "boolean",
+                    "null"
+                  ]
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": [
+                      "string",
+                      "number",
+                      "boolean",
+                      "null"
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          "required": [
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "ref": {
+              "type": "string",
+              "pattern": "^(/([^~/]|~[01])*)*$"
+            }
+          },
+          "required": [
+            "ref"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "op": {
+              "enum": [
+                "eq",
+                "ne",
+                "lt",
+                "le",
+                "gt",
+                "ge",
+                "and",
+                "or",
+                "not",
+                "exists",
+                "coalesce",
+                "if",
+                "in"
+              ]
+            },
+            "args": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 16,
+              "items": {
+                "$ref": "#/$defs/expression"
+              }
+            }
+          },
+          "required": [
+            "op",
+            "args"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "dependency": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "relationship": {
+          "enum": [
+            "invokes",
+            "observes"
+          ]
+        },
+        "target": {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "type": "string",
+              "minLength": 1
+            },
+            "capability": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9]*(\\.[a-z][a-z0-9]*)+(@[1-9][0-9]*)?$"
+            },
+            "provider": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "contract",
+            "capability"
+          ],
+          "additionalProperties": false
+        },
+        "required": {
+          "const": true
+        },
+        "versionConstraint": {
+          "type": "string",
+          "pattern": "^(\\^|~|>=|>|<=|<)?\\d+(\\.\\d+)*$"
+        },
+        "purpose": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "relationship",
+        "target",
+        "required"
+      ],
+      "additionalProperties": false,
+      "description": "A spec/dependencies-1.md dependency with a canonical target. Recipes never depend on an application's own capability."
+    },
+    "probe": {
+      "type": "object",
+      "properties": {
+        "uses": {
+          "type": "string",
+          "minLength": 1
+        },
+        "input": {
+          "type": "object",
+          "additionalProperties": {
+            "description": "A JSON value, or { \"$input\": pointer } / { \"$output\": pointer } (appport.integration/1 ValueRef)."
+          }
+        }
+      },
+      "required": [
+        "uses",
+        "input"
+      ],
+      "additionalProperties": false
+    },
+    "stateVerification": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "state"
+        },
+        "via": {
+          "$ref": "#/$defs/probe"
+        },
+        "expect": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/expectation"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "via",
+        "expect"
+      ],
+      "additionalProperties": false
+    },
+    "precondition": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "via": {
+          "$ref": "#/$defs/probe"
+        },
+        "require": {
+          "enum": [
+            "found",
+            "not-found"
+          ]
+        },
+        "expect": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/expectation"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "via",
+        "require"
+      ],
+      "additionalProperties": false
+    },
+    "expectation": {
+      "type": "object",
+      "properties": {
+        "at": {
+          "type": "string",
+          "pattern": "^(/([^~/]|~[01])*)*$"
+        },
+        "equals": {
+          "description": "A JSON value, or { \"$input\": pointer } / { \"$output\": pointer } (appport.integration/1 ValueRef)."
+        },
+        "exists": {
+          "const": true
+        }
+      },
+      "required": [
+        "at"
+      ],
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "required": [
+            "equals"
+          ]
+        },
+        {
+          "required": [
+            "exists"
+          ]
+        }
+      ]
+    }
+  }
+}

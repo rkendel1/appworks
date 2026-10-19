@@ -1,0 +1,25 @@
+{
+  "name": "@appport/recipe",
+  "version": "0.1.0",
+  "description": "AppWorks business recipes: the appport.recipe/1 source model, validation, dependency locks and source packages. Executes nothing and grants no authority.",
+  "license": "UNLICENSED",
+  "engines": { "node": ">=20" },
+  "repository": { "type": "git", "url": "git+https://github.com/rkendel1/appworks.git", "directory": "packages/recipe" },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    "./package.json": "./package.json"
+  },
+  "files": ["dist", "schemas", "README.md"],
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "tsc -b --clean"
+  },
+  "dependencies": {
+    "@appport/integration": "1.1.0",
+    "@appport/protocol": "1.1.0",
+    "@appport/schema": "1.1.0"
+  }
+}

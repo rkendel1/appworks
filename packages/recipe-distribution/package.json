@@ -1,0 +1,24 @@
+{
+  "name": "@appport/recipe-distribution",
+  "version": "0.1.0",
+  "description": "The boundary between AppWorks recipe packages and Distribution Protocol releases. The only AppWorks package that depends on Distribution Protocol.",
+  "license": "UNLICENSED",
+  "engines": { "node": ">=20" },
+  "repository": { "type": "git", "url": "git+https://github.com/rkendel1/appworks.git", "directory": "packages/recipe-distribution" },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    "./package.json": "./package.json"
+  },
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "tsc -b --clean"
+  },
+  "dependencies": {
+    "@appport/recipe": "workspace:0.1.0",
+    "@distribution-protocol/protocol": "1.0.0"
+  }
+}
