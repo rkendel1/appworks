@@ -16,7 +16,9 @@
     "boundary:check": "node scripts/check-boundary.mjs",
     "release:check": "node scripts/check-release.mjs",
     "publish:packages": "node scripts/publish-packages.mjs",
-    "extraction:memos": "node extractions/memos-reactions/scripts/extract.mjs"
+    "extraction:memos": "node extractions/memos-reactions/scripts/extract.mjs",
+    "serve": "tsc -b tsconfig.build.json && node packages/workspace/dist/cli.js serve",
+    "appworks": "node packages/workspace/dist/cli.js"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
