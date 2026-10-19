@@ -1,0 +1,41 @@
+{
+  "name": "@appport/extraction",
+  "version": "0.1.0",
+  "description": "AppWorks capability extraction: binds one assessed candidate of an existing application, a proposed AppPort contract, its adapter and verification evidence into an appport.capability-extraction/1 artifact. Executes nothing and grants no authority.",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rkendel1/appworks.git",
+    "directory": "packages/extraction"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "schemas",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "tsc -b --clean"
+  },
+  "dependencies": {
+    "@appport/assessment": "workspace:*",
+    "@appport/protocol": "1.2.0",
+    "@appport/schema": "1.1.1"
+  },
+  "bin": {
+    "appworks": "./dist/cli.js"
+  }
+}

@@ -1,3 +1,4 @@
 packages:
   - "packages/*"
+  - "extractions/*"
 linkWorkspacePackages: true

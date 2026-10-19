@@ -5,7 +5,7 @@
 | Layer | Responsibility | Where |
 |---|---|---|
 | **AppPort** | Canonical capability contracts, discovery, fulfillment validation, dependency resolution, invocation boundaries, reusable integration primitives (mapping rules, verification, schema compatibility) | `rkendel1/appport`: `@appport/protocol`, `@appport/schema`, `@appport/integration`, `@appport/core`, … |
-| **AppWorks** | Application assessment, business-capability extraction, recipe composition, versioned business packages, replacement planning; later, compilation and execution of business processes | this repository: `@appport/assessment`, `@appport/recipe`, `@appport/recipe-distribution` |
+| **AppWorks** | Application assessment, business-capability extraction, recipe composition, versioned business packages, replacement planning; later, compilation and execution of business processes | this repository: `@appport/assessment`, `@appport/extraction`, `@appport/recipe`, `@appport/recipe-distribution`; adapters in `extractions/` (private) |
 | **Distribution Protocol** | Independent publication, acquisition and verification of software releases | `rkendel1/distribution-protocol`: `@distribution-protocol/*` |
 | **Execution and authority infrastructure** | Authorization grants, bindings, execution control, durable state, evidence | AppPort's established layers (`@appport/core`, `@appport/authorization`); unchanged by AppWorks |
 
@@ -17,12 +17,13 @@ a package belongs to the AppPort protocol or lives in the AppPort repository.
 | | Repository | Packages | Responsibility |
 |---|---|---|---|
 | Protocol layer | `rkendel1/appport` | `@appport/protocol`, `@appport/integration`, `@appport/core`, `@appport/sdk`, … | capability protocol, discovery, fulfillment, integration |
-| Product | `rkendel1/appworks` | `@appport/assessment`, `@appport/recipe`, `@appport/recipe-distribution`; later, when its boundary justifies it, e.g. a compiler | business recipes, packages, modernization |
+| Product | `rkendel1/appworks` | `@appport/assessment`, `@appport/extraction`, `@appport/recipe`, `@appport/recipe-distribution`; later, when its boundary justifies it, e.g. a compiler | business recipes, packages, modernization |
 | Distribution | `rkendel1/distribution-protocol` | `@distribution-protocol/*` | publication, acquisition, verification |
 
 Likewise, the recipe formats are named `appport.recipe/1`, `appport.recipe-lock/1` and `appport.recipe-package/1`, the Distribution
-Protocol binding scheme `appport/recipe-package/1`, and the assessment format `appport.application-assessment/1`: ecosystem names,
-specified and owned here (`spec/recipe-1.md`, `spec/assessment-1.md`). AppPort's protocol
+Protocol binding scheme `appport/recipe-package/1`, the assessment format `appport.application-assessment/1`, and the extraction formats
+`appport.capability-extraction/1` (with its plan and verification-results inputs): ecosystem names, specified and owned here
+(`spec/recipe-1.md`, `spec/assessment-1.md`, `spec/extraction-1.md`). AppPort's protocol
 specification does not define them, and AppPort's packages neither implement nor read them.
 
 Each package is versioned and released independently, with its own changelog and compatibility contract. A new recipe release does not
@@ -36,10 +37,13 @@ require an AppPort release, and an AppPort release does not require an AppWorks 
             └──→ @distribution-protocol/protocol
 
 @appport/assessment ──→ @appport/protocol
+@appport/extraction ──→ @appport/assessment, @appport/protocol, @appport/schema
+extractions/* (private adapters) ──→ @appport/sdk at the version the application's own boundary pins; the application's boundary code, loaded in place
 
 AppPort packages ──✗──→ anything in this repository
 @appport/recipe  ──✗──→ @distribution-protocol/*, any registry; @appport/core only as a devDependency (tests)
-@appport/assessment ──✗──→ @appport/core (not even for tests), @distribution-protocol/*, @appport/recipe
+@appport/assessment ──✗──→ @appport/core (not even for tests), @distribution-protocol/*, @appport/recipe, @appport/extraction
+@appport/extraction ──✗──→ @appport/core, @appport/sdk, @distribution-protocol/*, any adapter
 ```
 
 1. **AppWorks depends on AppPort; AppPort does not depend on AppWorks.** AppWorks consumes AppPort's **published** packages at exact versions,
@@ -58,7 +62,13 @@ AppPort packages ──✗──→ anything in this repository
    resolves, registers, binds and invokes nothing, so a dependency on the runtime would only invite a parallel registry. Its source has no
    code-execution or network primitive, and only its CLI writes a file: the output, never inside the assessed repository.
 
-`scripts/check-boundary.mjs` enforces 1–4 and 6 on every build (including that `@appport/core` is never a runtime or peer dependency and
+7. **Extraction binds; it does not run.** `@appport/extraction` reads assessment artifacts, plans, contracts and file contents, and
+   uses AppPort's published `compareSchemas`, `compareManifests`, `capabilityDigest`, `contractDigest`, `lintIntegration`,
+   `isCanonicalContract` and `digestOf`. It never loads or executes an adapter, re-implements no scanner (it consumes
+   `verifyAssessment`), and has no code-execution or network primitive; only its CLI writes, and only its output. Adapters are
+   application-specific code in private packages under `extractions/`, run only by their own verification suites.
+
+`scripts/check-boundary.mjs` enforces 1–4, 6 and 7 on every build (including that `@appport/core` is never a runtime or peer dependency and
 never imported by shipped source). Rule 5 is a review rule.
 
 ## 4. How the recipe layer uses AppPort
@@ -89,7 +99,16 @@ AppPort's `isValidName` and the fields of AppPort's `CapabilityVersionEntry` (`v
 nowhere. The path from a proposal to an invocable capability is AppPort's: author a contract, implement or bridge it, claim fulfillment,
 verify, resolve, and bind with a grant. The artifact's digest uses AppPort's `digestOf`, the same rule as recipe packages.
 
-## 6. Authority and evidence
+## 6. How an extraction uses AppPort and the application's boundary
+
+The adapter is hosted by the application's **existing** AppPort boundary, never by a new server. For Memos that boundary is the
+bridge at `appport-bridge/` (trusted-boundary mode: `@appport/sdk` 1.2.2, `createServer`, `permissionAuthorizer`, the caller's Memos
+credential forwarded to Memos' own HTTP API). `extractions/memos-reactions/runtime/host.mjs` loads that bridge unmodified from the
+checkout and adds one capability definition to the same server, so discovery, transport, authentication and AppPort authorization are
+the bridge's, and every access decision is Memos'. The proposed contract is an AppPort canonical contract; conformance of the live
+capability is checked with AppPort's `compareSchemas`, and the fulfillment claim with `evaluateFulfillment`.
+
+## 7. Authority and evidence
 
 AppWorks introduces none. In particular:
 
@@ -99,4 +118,7 @@ AppWorks introduces none. In particular:
 * verification of steps and outcomes is declared in AppPort's state-verification model; the evidence a future runtime records is AppPort's
   `VerificationEvidence`;
 * an assessment's evidence describes source text (observed), conclusions drawn from it (inferred) and what could not be determined
-  (unknown). It is not AppPort verification evidence, and its `scope` states that it grants nothing, verifies nothing and modified nothing.
+  (unknown). It is not AppPort verification evidence, and its `scope` states that it grants nothing, verifies nothing and modified nothing;
+* an extraction's verification records state, per behavior, what a named procedure established for one source revision, contract and
+  adapter. They are not authorization: a caller still needs its own application credential and AppPort's authorization at the boundary,
+  and discovering the capability grants nothing.

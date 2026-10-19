@@ -44,11 +44,15 @@ one designed for a new application are the same kind of thing, fulfilled, resolv
 | Recipe compiler | **not implemented** |
 | Recipe runtime, durable orchestration, human-task persistence | **not implemented** |
 | Repository assessment, capability discovery in existing code (`@appport/assessment`) | implemented for Go and Protocol Buffers, draft format `appport.application-assessment/1`: static, evidence-backed candidates and one recommended exposure candidate; verifies nothing |
-| Automated extraction, replacement planning, migration | **not implemented** |
+| Capability extraction (`@appport/extraction`) | implemented for read-only request/response operations, draft format `appport.capability-extraction/1`: one assessed candidate, a proposed AppPort canonical contract with an explained mapping, an adapter hosted by the application's existing AppPort boundary, and per-behavior verification tied to source revision, contract and adapter. First extraction: Memos `ListMemoReactions` as `memos.reactions.list@1` (17 of 18 behaviors passed against a real Memos; publishing a fulfillment claim is blocked by the bridge) |
+| Write-capability extraction, source extraction into portable implementations, replacement planning, migration | **not implemented** |
 | Visual Recipe Studio | **not implemented** |
 
 Nothing in this repository executes a recipe, extracts code, migrates an application or establishes that a business outcome occurred. An
-assessment reads an application; it does not run it, change it, or establish that anything it describes behaves as described.
+assessment reads an application; it does not run it, change it, or establish that anything it describes behaves as described. An
+extraction exposes one existing operation through the application's existing boundary without changing the application; it grants no
+access, deploys nothing, and establishes only the behaviors its verification records say passed, for the revision, contract and adapter
+they name.
 
 ## Principles
 

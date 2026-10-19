@@ -5,6 +5,9 @@ The artifact is an evidence-backed inventory of the business capabilities the ap
 read, write and call, how they are authorized, validated and tested, and which one is the most reasonable first candidate for AppPort
 exposure. Specification: `spec/assessment-1.md` in [rkendel1/appworks](https://github.com/rkendel1/appworks). JSON Schema ships in `schemas/`.
 
+The `appworks` command comes with `@appport/extraction`. This package alone installs `appworks-assess`, which takes the same `assess`
+and `verify` commands.
+
 ```sh
 appworks assess ./memos --output memos-assessment.json     # exit 0 (complete or partial), 1 fatal, 2 usage, 3 --strict and partial
 appworks verify memos-assessment.json --repo ./memos       # integrity, honesty, and every observed location against the files

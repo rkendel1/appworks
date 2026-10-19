@@ -22,3 +22,9 @@ import type { CapabilityVersionEntry } from "@appport/protocol";
 export const assess: (root: string) => ApplicationAssessment = (root) => assessRepository(root);
 export const ok: (value: unknown) => boolean = (value) => verifyAssessment(value).ok;
 export const asEntry = (p: ProposedCapability): Pick<CapabilityVersionEntry, "version" | "kind" | "inputSchema" | "outputSchema" | "effect"> => p;
+
+// @appport/extraction: an extraction pins its assessment by digest and records verification per behavior.
+import { createExtraction, verifyExtraction, type CapabilityExtraction, type VerificationRecord } from "@appport/extraction";
+export const extract = (assessment: ApplicationAssessment, candidate: string): CapabilityExtraction => createExtraction({ assessment, candidate, checkout: { revision: assessment.target.revision } });
+export const records = (x: CapabilityExtraction): VerificationRecord[] => x.verification.records;
+export const valid = (x: unknown): boolean => verifyExtraction(x).ok;

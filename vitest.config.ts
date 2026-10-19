@@ -9,6 +9,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@appport/assessment": r("./packages/assessment/src/index.ts"),
+      "@appport/extraction": r("./packages/extraction/src/index.ts"),
       "@appport/recipe": r("./packages/recipe/src/index.ts"),
       "@appport/recipe-distribution": r("./packages/recipe-distribution/src/index.ts")
     }

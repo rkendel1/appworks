@@ -15,7 +15,8 @@
     "test": "vitest run",
     "boundary:check": "node scripts/check-boundary.mjs",
     "release:check": "node scripts/check-release.mjs",
-    "publish:packages": "node scripts/publish-packages.mjs"
+    "publish:packages": "node scripts/publish-packages.mjs",
+    "extraction:memos": "node extractions/memos-reactions/scripts/extract.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

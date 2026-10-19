@@ -2,6 +2,7 @@
   "files": [],
   "references": [
     { "path": "./packages/assessment" },
+    { "path": "./packages/extraction" },
     { "path": "./packages/recipe" },
     { "path": "./packages/recipe-distribution" }
   ]

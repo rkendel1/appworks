@@ -235,6 +235,9 @@ appworks verify <file> [--repo <repo>]
 appworks --version
 ```
 
+(`appworks` is installed by `@appport/extraction`, which adds `extract` and `verify-extraction`, `spec/extraction-1.md`; `@appport/assessment`
+alone installs the same `assess` and `verify` commands as `appworks-assess`.)
+
 `assess` writes the artifact (2-space JSON) and prints a summary: partial or complete, files, candidates by class, the recommendation, the
 digest. It refuses an output path inside the assessed repository, and an existing output unless `--force` (and then only a regular file).
 
