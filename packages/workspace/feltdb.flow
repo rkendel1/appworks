@@ -18,6 +18,7 @@ app appworks_workspace {
     failure: json?
     current: json
     activeRun: text?
+    agentRun: text?
     history: integer
     index createdBy using hash(createdBy)
   }
@@ -155,6 +156,54 @@ app appworks_workspace {
     commit: text?
     branch: text?
     index projectId using hash(projectId)
+  }
+
+  // An agent run: one agent (its identity recorded, never a credential) proposing actions on one project, one decision
+  // per turn. The project's `agentRun` names the run that holds it, so two agent runs never drive the same project. The
+  // lease is renewed while a worker carries the run; a run whose lease expired was interrupted and may be resumed.
+  // Nothing an agent says is evidence: the workflow's own runs and records are.
+  collection AgentRun {
+    id: text
+    projectId: text
+    status: enum(running, paused, completed, blocked, exhausted, failed, cancelled)
+    agent: json
+    task: text
+    limits: json
+    startedAt: datetime
+    startedBy: text
+    updatedAt: datetime
+    owner: text?
+    leaseExpiresAt: datetime?
+    turns: integer
+    cancelRequested: boolean?
+    pause: json?
+    outcome: json?
+    usage: json?
+    switches: json?
+    error: json?
+    finishedAt: datetime?
+    index projectId using hash(projectId)
+  }
+
+  // One turn of an agent run: the decision the agent proposed, its validation, and what AppWorks actually did. A turn
+  // is recorded as `executing` before its action runs, so a resumed run reconciles the action's effect from the
+  // workflow's own records instead of repeating it.
+  collection AgentTurn {
+    id: text
+    runId: text
+    projectId: text
+    turn: integer
+    at: datetime
+    status: enum(executing, succeeded, failed, refused, invalid, paused, asked, answered, finished, interrupted)
+    decision: json?
+    problems: json?
+    action: text?
+    workspaceRun: text?
+    result: json?
+    usage: json?
+    attempts: integer
+    finishedAt: datetime?
+    index runId using hash(runId)
   }
 
   // One step per transition. `from` lists the stages a step starts from, `rerun` the later stages it may be run

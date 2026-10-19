@@ -22,6 +22,7 @@ import { createExtraction, ExtractionRefused, observeCheckout, readPlan, verifyE
 import { digestOf, type AppPortManifest } from "@appport/protocol";
 import { requireAllowed, parseCredentialReference, type Authority, type CredentialResolver } from "./authority.js";
 import { discoverCapabilities, type DiscoveryRecord } from "./discovery.js";
+import { endpointCandidates } from "./endpoints.js";
 import { inspectIntegration, treeHash, type IntegrationRecord } from "./inspect.js";
 import { APPROVAL_ACTIONS, MODEL, STAGES, STEPS, stagesAfter, WorkspaceError, type ApprovalAction, type ApprovalRecord, type ArtifactKind, type ArtifactRecord, type Principal, type Project, type PromotionRecord, type Reason, type RepositoryIdentity, type Run, type Stage, type StageEvent, type StepName, type VerificationRecord } from "./model.js";
 import { adoptionProblems, proposeAdoption, type ContractAdoption } from "./adoption.js";
@@ -45,6 +46,8 @@ export interface WorkspaceOptions {
   leaseMs?: number;
   /** Discovery's fetch (tests). */
   fetch?: typeof globalThis.fetch;
+  /** Origins to try first when discovering without an endpoint (APPWORKS_DISCOVERY_ORIGINS). */
+  discoveryOrigins?: string[];
   runnerTimeoutMs?: number;
   /** Tests only: called at named points of a step; throwing `SimulatedCrash` stops the run as if the process died. */
   faultPoint?: (name: string, context: { project: string; worktree?: string }) => void;
@@ -97,6 +100,7 @@ export class Workspace {
   readonly worker: string;
   private readonly leaseMs: number;
   private readonly fetch: typeof globalThis.fetch | undefined;
+  private readonly discoveryOrigins: string[];
   private readonly runnerTimeoutMs: number | undefined;
   private readonly faultPoint: WorkspaceOptions["faultPoint"];
 
@@ -111,6 +115,7 @@ export class Workspace {
     this.worker = options.worker ?? `worker-${process.pid}-${randomUUID().slice(0, 8)}`;
     this.leaseMs = options.leaseMs ?? 60_000;
     this.fetch = options.fetch;
+    this.discoveryOrigins = options.discoveryOrigins ?? [];
     this.runnerTimeoutMs = options.runnerTimeoutMs;
     this.faultPoint = options.faultPoint;
   }
@@ -124,6 +129,11 @@ export class Workspace {
   }
 
   private iso = () => this.now().toISOString();
+
+  /** Asks the workspace's authority; refuses with `UNAUTHORIZED`. For callers that act through the workspace (agents). */
+  async authorize(principal: Principal, action: string, resource: { project?: string } = {}): Promise<void> {
+    await requireAllowed(this.authority, principal, action, resource);
+  }
 
   // ---- reads ---------------------------------------------------------------------------------------------------
 
@@ -179,7 +189,9 @@ export class Workspace {
     if (!this.providers[input.provider]) throw new WorkspaceError("UNSUPPORTED", `no ${input.provider} provider is configured`);
     const name = /^[A-Za-z0-9_.-]{1,100}$/;
     if (!name.test(input.owner) || !name.test(input.name)) throw new WorkspaceError("INVALID_INPUT", "owner and repository are GitHub-style names");
-    if (!input.ref || /\s|\.\.|^-/.test(input.ref)) throw new WorkspaceError("INVALID_INPUT", "a ref is a branch, tag or commit SHA");
+    // No ref: the repository's default branch (`HEAD`), resolved when the revision is acquired.
+    input = { ...input, ref: input.ref?.trim() || "HEAD" };
+    if (/\s|\.\.|^-/.test(input.ref)) throw new WorkspaceError("INVALID_INPUT", "a ref is a branch, tag or commit SHA");
     const url = (input.url ?? `https://github.com/${input.owner}/${input.name}`).replace(/\.git$/, "");
     if (/^[a-z]+:\/\/[^/]*@/.test(url) || (input.fetchFrom && /^[a-z]+:\/\/[^/]*@/.test(input.fetchFrom))) throw new WorkspaceError("INVALID_INPUT", "a repository URL never carries a credential; pass a credential reference");
     const repository: RepositoryIdentity = {
@@ -377,7 +389,7 @@ export class Workspace {
       });
       const partial: Reason[] = resolved.onDefaultBranch === "yes" ? [] : [{ code: "REVISION_NOT_ON_DEFAULT_BRANCH", message: resolved.note ?? `${resolved.sha.slice(0, 12)} is not established as part of ${resolved.defaultBranch ?? "the default branch"}` }];
       return {
-        revision: { sha: resolved.sha, ref: p.ref, pinnedAt: "", checkout, treeDigest: "", onDefaultBranch: resolved.onDefaultBranch, ...(resolved.defaultBranchSha ? { defaultBranchSha: resolved.defaultBranchSha } : {}) },
+        revision: { sha: resolved.sha, ref: resolved.ref ?? p.ref, pinnedAt: "", checkout, treeDigest: "", onDefaultBranch: resolved.onDefaultBranch, ...(resolved.defaultBranchSha ? { defaultBranchSha: resolved.defaultBranchSha } : {}) },
         repository: { ...(resolved.defaultBranch ? { defaultBranch: resolved.defaultBranch } : {}) },
         partial,
         evidence: [resolved.sha],
@@ -417,10 +429,12 @@ export class Workspace {
     return this.begin(principal, id, "discover", { stage: startsFrom("discover"), input, resuming }, async ({ project: p, run }) => {
       this.assertRevision(p);
       const integration = await this.body<IntegrationRecord>(p.current.integration, "integration inspection");
-      const record = await discoverCapabilities({ ...(input.endpoint ? { endpoint: input.endpoint.replace(/\/$/, "") } : {}), integrationPresent: integration.body.status === "present", canonical: this.canonicalContracts(), now: this.now, ...(this.fetch ? { fetch: this.fetch } : {}) });
+      const present = integration.body.status === "present";
+      const candidates = !input.endpoint && present ? endpointCandidates(this.store.resolve(p.revision!.checkout), { configured: this.discoveryOrigins, integrationRoots: integration.body.integrations.map((i) => i.root) }) : [];
+      const record = await discoverCapabilities({ ...(input.endpoint ? { endpoint: input.endpoint.replace(/\/$/, "") } : {}), candidates, integrationPresent: present, canonical: this.canonicalContracts(), now: this.now, ...(this.fetch ? { fetch: this.fetch } : {}) });
       const { record: artifact, writes } = await this.existingOrWrite(p, "discovery", record, run, { format: record.format, summary: { outcome: record.outcome, capabilities: record.capabilities.length } });
       const partial: Reason[] = record.outcome === "unavailable" ? [{ code: "DISCOVERY_UNAVAILABLE", message: record.note }] : [];
-      return { writes, current: { discovery: artifact.id }, partial, evidence: [artifact.id], note: `${record.outcome}: ${record.capabilities.length} capabilities; nothing invoked` };
+      return { writes, current: { discovery: artifact.id }, partial, evidence: [artifact.id], note: `${record.outcome}${record.endpoint ? ` at ${record.endpoint}${record.resolution?.given ? "" : " (found from the source)"}` : ""}: ${record.capabilities.length} capabilities; nothing invoked` };
     });
   }
 

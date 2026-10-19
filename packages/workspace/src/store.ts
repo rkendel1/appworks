@@ -18,7 +18,7 @@ import { recordProblems } from "./flow.js";
 import { MODEL, WorkspaceError, type ArtifactRecord } from "./model.js";
 
 /** The collections of `feltdb.flow`. */
-export type Collection = "Project" | "StageEvent" | "Run" | "Artifact" | "Approval" | "Decision" | "Verification" | "Promotion";
+export type Collection = "Project" | "StageEvent" | "Run" | "Artifact" | "Approval" | "Decision" | "Verification" | "Promotion" | "AgentRun" | "AgentTurn";
 
 /** One write in a transaction: create (`requireAbsent`) or replace the version that was read (`ifVersion`). */
 export type Write = { collection: Collection; id: string; value: Record<string, unknown> } & ({ create: true } | { ifVersion: number });

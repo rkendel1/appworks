@@ -58,6 +58,8 @@ export interface ProjectView {
   discovery?: { outcome: DiscoveryRecord["outcome"]; endpoint?: string; at: string; state?: string; reasons: string[]; application?: DiscoveryRecord["application"]; capabilities: DiscoveryRecord["capabilities"]; established: DiscoveryRecord["established"]; note: string; artifact: string };
   assessment?: { digest: string; artifact: string; fileDigest: string; partial: string[]; coverage: { filesSeen: number; filesAnalyzed: number }; candidates: number; recommendation?: string; questions: number };
   inventory?: InventoryRecord & { artifact: string };
+  /** The reviewed extractions this workspace has, and whether their candidate is in this project's assessment. */
+  extractions: Array<{ name: string; candidate: string; identity: string; inThisAssessment: boolean }>;
   selection?: { candidate: string; name: string; rationale: string; by: string; at: string };
   plan?: { artifact: string; digest: string; extraction: string; identity: string; behaviors: number; planDirectory: string };
   approvals: Array<Pick<ApprovalRecord, "id" | "action" | "subject" | "subjectDescription" | "status" | "requestedAt" | "requestedBy" | "grantedAt" | "grantedBy" | "consumedAt" | "consumedBy">>;
@@ -135,6 +137,7 @@ export async function projectView(ws: Workspace, principal: Principal, id: strin
     approvals: approvals.map(({ id: aid, action, subject, subjectDescription, status, requestedAt, requestedBy, grantedAt, grantedBy, consumedAt, consumedBy }) => ({ id: aid, action, subject, subjectDescription, status, requestedAt, requestedBy, ...(grantedAt ? { grantedAt } : {}), ...(grantedBy ? { grantedBy } : {}), ...(consumedAt ? { consumedAt } : {}), ...(consumedBy ? { consumedBy } : {}) })),
     runs: runs.sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1)).map(({ id: rid, step, attempt, status, owner, actor, startedAt, finishedAt, error }) => ({ id: rid, step, attempt, status, owner, actor, startedAt, ...(finishedAt ? { finishedAt } : {}), ...(error ? { error } : {}) })),
     history: events.sort((a, b) => a.sequence - b.sequence).map(({ sequence, step, from, to, condition, at, actor, note, reasons }) => ({ sequence, step, ...(from ? { from } : {}), to, condition, at, actor, ...(note ? { note } : {}), reasons })),
+    extractions: [],
     next: { summary: "", actions: [], note: "" }
   };
   const notice = p.condition.reasons.find((r) => r.code === "REVISION_NOT_ON_DEFAULT_BRANCH");
@@ -154,6 +157,7 @@ export async function projectView(ws: Workspace, principal: Principal, id: strin
   }
   const inventory = await ws.artifact<InventoryRecord>(principal, p.current.inventory);
   if (inventory) view.inventory = { ...inventory.body, artifact: inventory.record.id };
+  view.extractions = ws.extractions().map((e) => ({ name: e.name, candidate: e.candidate, identity: `${e.identity.name} revision ${e.identity.revision}`, inThisAssessment: Boolean(inventory?.body.candidates.some((c) => c.id === e.candidate)) }));
   const decisions = await ws.records<Record<string, unknown> & { id: string }>(principal, "Decision", id);
   const selection = decisions.find((d) => d.id === p.current.selection);
   if (selection) view.selection = { candidate: String(selection.candidate), name: String(selection.name), rationale: String(selection.rationale ?? ""), by: String(selection.by), at: String(selection.at) };
@@ -239,11 +243,13 @@ export function advise(v: ProjectView): ProjectView["next"] {
       add("inspect", "Inspect integration", "look for an existing AppPort integration in the pinned files (static: nothing runs)");
       break;
     case "integration-inspected":
-      add("discover", "Discover capabilities", v.integration?.status === "present" ? "ask a running instance what it advertises, through AppPort's client. Without an endpoint, discovery is recorded as unavailable" : "no integration was found; discovery records that explicitly", { inputs: [{ name: "endpoint", label: "Application origin", required: false, hint: "for example http://127.0.0.1:4000. No credential is sent." }] });
+      add("discover", "Discover capabilities", v.integration?.status === "present" ? "find a running instance from the ports the pinned source names (loopback only) and ask it what it advertises, through AppPort's client. Nothing is invoked and no credential is sent" : "no integration was found; discovery records that explicitly");
+      if (v.integration?.status === "present") add("discover", "Discover at a given origin", "only if the application runs somewhere the source does not say", { inputs: [{ name: "endpoint", label: "Application origin", required: true, hint: "for example http://127.0.0.1:4000. No credential is sent." }] });
       break;
     case "capabilities-discovered":
       add("assess", "Assess revision", "static assessment of the same pinned revision");
-      add("discover", "Discover again", "with another endpoint", { inputs: [{ name: "endpoint", label: "Application origin", required: false }] });
+      add("discover", "Discover again", v.discovery?.outcome === "unavailable" ? "after starting the application: the origins the source names are probed again" : "probe the application again");
+      if (v.integration?.status === "present") add("discover", "Discover at a given origin", "only if the application runs somewhere the source does not say", { inputs: [{ name: "endpoint", label: "Application origin", required: true }] });
       break;
     case "assessment-completed":
       add("reconcile", "Reconcile inventory", "match discovered capabilities with assessed candidates, with graded evidence");
@@ -251,7 +257,9 @@ export function advise(v: ProjectView): ProjectView["next"] {
     case "inventory-reconciled":
     case "candidate-selected": {
       const extractable = v.inventory?.candidates.filter((c) => c.readiness === "exposure-candidate") ?? [];
-      add("select", p.stage === "candidate-selected" ? "Select another candidate" : "Select candidate", `${extractable.length} candidates are classified exposure-candidate`, { inputs: [{ name: "candidate", label: "Candidate id", required: true, ...(v.assessment?.recommendation ? { value: v.assessment.recommendation } : {}) }, { name: "rationale", label: "Rationale", required: false }] });
+      const reviewed = v.extractions.find((e) => e.inThisAssessment)?.candidate;
+      const suggested = reviewed ?? v.assessment?.recommendation;
+      add("select", p.stage === "candidate-selected" ? "Select another candidate" : "Select candidate", `${extractable.length} candidates are classified exposure-candidate`, { inputs: [{ name: "candidate", label: "Candidate id", required: true, ...(suggested ? { value: suggested } : {}), hint: reviewed ? "pre-filled: the candidate with a reviewed extraction" : "pre-filled: the assessment's recommendation" }, { name: "rationale", label: "Rationale", required: false }] });
       if (p.stage === "candidate-selected") add("plan", "Validate extraction plan", "validate the reviewed plan for the selected candidate with the extraction library (no code is generated)");
       break;
     }

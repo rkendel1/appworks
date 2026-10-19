@@ -77,6 +77,10 @@ anything else      ──✗──→ @appport/workspace
    reviewed extraction runner, after an approval. Processes run in `src/repository.ts` (git, against its own isolated checkout) and
    `src/runner.ts` only; only `src/server.ts` serves HTTP, on loopback. It is private: `@appport/github` 1.0.2 brings a second, older
    AppPort stack, which a published library must not.
+   Its agent runtime (`src/agent/`) adds `@appport/schema` (validating decisions) and two model providers' SDKs, `@anthropic-ai/sdk`
+   and `openai`, each imported only by its own adapter (`src/agent/providers/<provider>.ts`): the orchestrator, the action registry and
+   the workflow see the provider-neutral `appworks.agent/1` contract and nothing else, so an adapter (Stack-Agent's, when it has a
+   decision-only contract) can replace another without touching them.
 
 `scripts/check-boundary.mjs` enforces 1–4, 6, 7 and 8 on every build (including that `@appport/core` is never a runtime or peer dependency and
 never imported by shipped source). Rule 5 is a review rule.
@@ -137,6 +141,7 @@ after, and stops otherwise. Discovery uses AppPort's client (`appport.manifest`)
 | Contract adoption | `isCanonicalContract`, `capabilityDigest`, `contractDigest`, `compareSchemas`, `digestOf` (`@appport/protocol`); `contractProblems`, `fulfillmentProblems`, `contractChanges`, `verifyExtraction` (`@appport/extraction`). No registry: the adopted contract is a file the promotion adds, published through the application's own boundary |
 | Promotion | a reviewed promotion plan per extraction; byte-for-byte copies of verified files; an isolated git worktree of the pinned revision; the extraction's own behavioral suite and mutation check run against the promoted copy |
 | Presentation | stack-ui 0.5.0 static release (vendored, unmodified) |
+| Agent runs | the same FeltDB (`AgentRun`, `AgentTurn` in `feltdb.flow`; transactions fenced on versions); model providers through their SDKs in one adapter each; FeltDB's agent APIs are server-only or in-process in 0.12.0 (`openAgentState`, 0.12.1, is a candidate for the run store later) |
 
 Not used, with the reason in `spec/workspace-1.md` §10 and the package README: `@appport/services` jobs, secrets, API keys and webhooks;
 Chip; AuthBoundry in process.

@@ -31,6 +31,8 @@ and the boundaries it enforces. The code is in `packages/workspace`; the durable
 | `Approval` | action and exact subject | `requested` → `granted` → `consumed` |
 | `Decision` | operator decision | candidate selection, match assertion, promotion status |
 | `Verification` | verification of an extraction | integrity findings, behavior counts by target, checkout check, reasons, the digests it was made for |
+| `AgentRun` | agent run on a project | agent identity (provider, implementation, model; never a credential), task, limits, lease, status, pause, outcome, usage, recorded agent switches; `Project.agentRun` names the run holding the project |
+| `AgentTurn` | decision of an agent run | the proposed decision, validation problems, the action, the workflow run it started, the recorded result and its class; written `executing` before the action runs |
 
 ## 3. Workflow
 
@@ -90,6 +92,12 @@ repeated. An action whose external effect was recorded on a run (a pull request)
 * **Credentials are references** (`env:NAME`), never values. A value is resolved in memory at the moment of use, passed to git in its
   environment as an HTTP header (never a command line or URL), and never written to FeltDB, an artifact, a run or a log. Reading and
   writing use separate references and separate capabilities.
+* **No ref** means the repository's default branch (`HEAD`), resolved and recorded as that branch when the revision is acquired.
+* **Discovery finds the running application itself.** Without an origin, `discover` takes the ports the pinned source names
+  (configuration, compose files, Dockerfiles, scripts, READMEs, code; ranked, test fixtures discounted, the AppPort integration's own
+  files first) as loopback origins, after any operator-configured `APPWORKS_DISCOVERY_ORIGINS`, and probes each through AppPort's
+  discovery until one verifies. A host named in the source is never contacted: the source chooses at most a port, on this machine. The
+  discovery record lists every probe and the source lines behind it; an origin given by a person overrides the search.
 * **Nothing from the repository is executed** by acquisition, inspection, discovery, assessment or reconciliation. The only step that
   runs anything is `execute`, which runs the reviewed extraction's runner after its approval.
 
@@ -141,9 +149,69 @@ Authority and approval are separate, and both are enforced at the action boundar
 
 ## 8. Agents
 
-The advisor explains the project's state and lists next actions from the recorded state by fixed rules. It needs no model, decides nothing,
-and its suggestions pass through the same authority, preconditions and approvals as any request. Deterministic validators (the extraction
-library, the boundary checks above) decide every transition.
+The **advisor** explains the project's state and lists next actions from the recorded state by fixed rules. It needs no model, decides
+nothing, and its suggestions pass through the same authority, preconditions and approvals as any request.
+
+An **agent run** drives the workflow autonomously (`src/agent/`). The agent proposes; AppWorks validates, authorizes and executes.
+
+* **Contract (`appworks.agent/1`, `src/agent/contract.ts`).** One decision per call. The request (`appworks.agent-request/1`) carries
+  the run and turn, the task, a compact credential-free view of the project's recorded state (with the advisor's suggestions marked
+  advisory), the actions offered now with a JSON Schema each, the history of earlier decisions with what was actually recorded, and the
+  constraints (remaining turns, rules). The response (`appworks.agent-response/1`) is exactly one of: request an offered action with
+  arguments and a rationale, ask a person, or finish (`done`, `blocked` with blockers, `nothing-to-do`); with optional usage. An adapter
+  declares its identity (provider, implementation, model) and capabilities (stateful sessions, cancellation, usage, local, model), honors
+  an `AbortSignal` and a time bound, and reports every failure as an `AgentError` of one kind (`invalid-output`, `timeout`,
+  `rate-limited`, `transient`, `authentication`, `configuration`, `cancelled`, `refused`, `unknown`) with retry guidance. The history
+  in the request is authoritative; a stateful agent may keep its own state but must accept it. Single-decision, multi-turn, stateful,
+  stateless, local and remote agents all fit this one shape: the multi-turn loop is the orchestrator's.
+* **Validation before anything runs.** The response format, the decision's shape, that an action was offered in this turn, and its
+  arguments against the action's schema (`@appport/schema`). An invalid decision executes nothing; it is recorded and returned to the
+  agent; three in a row fail the run (`AGENT_OUTPUT_INVALID`).
+* **Action registry (`src/agent/actions.ts`).** Each action has a versioned id, an argument schema, the authority it needs, its
+  side-effect class (`none`, `workspace-state`, `external-read`, `executes-target-code`, `isolated-write`, `local-commit`), the approval
+  its boundary requires, whether it is safe to repeat, a time bound, and the class of its result. Workflow actions
+  (`workflow.<step>@1` for the flow's steps except `create` and `submit-review`, plus `workflow.commit@1` and `workflow.resume@1`) go
+  through `Workspace.dispatch`, the CLI's and the web's own path, so the step's authority, stage, claim, lease, evidence and approval
+  checks all apply. Read actions (`source.list@1`, `source.read@1`, `source.search@1`, `evidence.read@1`, `candidate.inspect@1`) read the
+  pinned checkout or recorded evidence, bounded, refusing paths that may hold credentials (`.env*`, keys, `.git`, credential files) and
+  any path that leads outside the checkout, and redacting anything that looks like a credential. There is no shell, file write, network
+  tool, approval or cancellation action.
+* **Approvals.** An action whose boundary refuses it for want of an approval (`APPROVAL_REQUIRED`) pauses the run with the approval and
+  the exact subject the workflow derives; a person approves it (`appworks project approve`), and resuming lets the agent request it
+  again. A changed subject pauses again. The agent can neither approve nor see an approval it could replay.
+* **Results and evidence classes.** A turn's result is what AppWorks recorded: `workflow-record` (a workflow run and the evidence ids it
+  produced), `source-observation` or `workspace-read` (read-only; evidence for no stage), `human-answer`, or `none`. An agent's rationale
+  and its claimed outcome are recorded as the agent's words, never as evidence: a run's outcome carries the project's actual stage and
+  condition beside what the agent claimed.
+* **Orchestrator (`src/agent/runner.ts`).** Each turn reads the durable state, computes the eligible actions from the flow, asks for
+  one decision (bounded by `decisionTimeoutMs` even for an adapter that ignores its signal; retried up to `maxRetries` only for a
+  retryable failure, honoring a provider's retry-after; never handed to another provider), validates it, records the turn as
+  `executing`, executes it, and records the result. It waits while another worker's step holds the project. It stops at `finish`
+  (`completed` or `blocked`), at a question or an approval (`paused`), at `maxTurns` (`exhausted`), on a stop request (`cancelled`), when
+  the project is cancelled, or on a non-retryable agent failure (`failed`, with the error kind; an authentication failure is never
+  retried and never falls back).
+* **One run per project, and recovery.** Starting a run claims the project (`Project.agentRun`, fenced on the project's version, refused
+  while a step runs); a second start is `AGENT_RUN_IN_PROGRESS`, `AGENT_RUN_PAUSED` or `AGENT_RUN_INTERRUPTED`. A worker renews the
+  run's lease; a run whose lease expired is interrupted and may be resumed by any worker. Resuming reconciles a turn left `executing`
+  from the workflow's own `Run` records: a step that completed is recorded as completed (not repeated), one that failed as failed, one
+  that never claimed a run as not started, and one whose run still holds the project as interrupted (the workflow's resume handles it).
+  The agent then decides from that. Stopping a run aborts its decision in flight; a workflow step in flight finishes under its own lease
+  and is recorded. Stopping never cancels the project.
+* **Agent selection and switching.** `APPWORKS_AGENT_PROVIDER` (`anthropic`, `openai`, `deterministic`) and `APPWORKS_AGENT_MODEL`
+  choose the agent; nothing is inferred from which keys are set; a missing provider, model or key is refused by name
+  (`AGENT_NOT_CONFIGURED`, `AGENT_MISCONFIGURED`, `AGENT_UNAVAILABLE`). `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` are read from the
+  environment (or `.env.local`, optional, never printed) when the adapter is made and kept only there; the SDKs read nothing from the
+  environment themselves. Limits: `APPWORKS_AGENT_TIMEOUT_MS`, `APPWORKS_AGENT_MAX_TURNS`, `APPWORKS_AGENT_MAX_RETRIES`,
+  `APPWORKS_AGENT_MAX_TOKENS`. Each run records its agent's identity. Resuming with a different agent is refused
+  (`AGENT_SWITCH_REQUIRED`) unless the switch is explicit; it is then recorded on the run (`switches`).
+* **Adapters.** `appworks-anthropic@1` (Messages API, a forced tool choice), `appworks-openai@1` (Responses API, a required function
+  call, `store: false`), `appworks-deterministic@1` (follows the advisor; no model, no network; never retries a failed action) and the
+  scripted fake for tests. Each is stateless: the request is sent whole. SDK retries are off; the orchestrator's policy is the only one.
+  All pass one conformance suite (`test/agent-conformance.test.ts`) through each SDK's `fetch` option, so CI needs no credential.
+* **Stack-Agent.** Not integrated. It would be one more adapter behind `appworks.agent/1`: a decision-only mode that returns one
+  decision for a request and executes nothing itself (its `work` mode executes its own capabilities, which AppWorks must not delegate).
+* **Secrets.** Configured keys are scrubbed, with credential-shaped text, from every request, turn and run record. No key is in
+  persisted configuration, agent context, evidence or a report.
 
 ## 9. Interfaces
 
@@ -151,6 +219,9 @@ library, the boundary checks above) decide every transition.
   against its `SHA256SUMS`), under a hash-pinned content security policy. Mutations require JSON, the `x-appworks-request` header and the
   server's own origin; unknown host names are refused. It acts as the operator who started it and has no network authentication
   boundary, and therefore no API keys.
+* **Agent:** `appworks agent run|status|stop|resume|check` and the web workspace's Agent section call the same operations
+  (`src/agent/operations.ts`); `appworks agent status <id> --json` prints the object `GET /api/projects/<id>/agent` returns, and
+  `POST /api/projects/<id>/agent/{start,stop,resume}` take the same inputs.
 * **CLI:** `appworks project …` and `appworks serve`; `appworks assess|verify|extract|verify-extraction` are `@appport/extraction`'s,
   unchanged. `appworks project show <id> --json` prints the same object `GET /api/projects/<id>` returns.
 

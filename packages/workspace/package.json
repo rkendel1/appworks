@@ -34,12 +34,15 @@
     "clean": "tsc -b --clean"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "0.135.0",
     "@appport/assessment": "workspace:*",
     "@appport/client": "1.1.3",
     "@appport/extraction": "workspace:*",
     "@appport/github": "1.0.2",
     "@appport/protocol": "1.2.0",
-    "@feltdb/core": "0.12.0"
+    "@appport/schema": "1.1.1",
+    "@feltdb/core": "0.12.0",
+    "openai": "7.39.0"
   },
   "bin": {
     "appworks": "./dist/cli.js"

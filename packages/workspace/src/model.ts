@@ -89,6 +89,8 @@ export interface Project {
   current: Partial<Record<EvidenceSlot, string>>;
   /** The run holding the project, if a step is in progress. */
   activeRun?: string;
+  /** The agent run holding the project, if one is running or paused (see `agent/runner.ts`). */
+  agentRun?: string;
   /** How many stage events exist: the next one's sequence number. */
   history: number;
   __version?: number;
@@ -225,7 +227,7 @@ export class WorkspaceError extends Error {
 export function statusOf(code: string): number {
   if (code === "UNAUTHORIZED") return 403;
   if (code === "NOT_FOUND" || code === "PROJECT_NOT_FOUND") return 404;
-  if (code === "CONFLICT" || code === "STEP_IN_PROGRESS") return 409;
+  if (code === "CONFLICT" || code === "STEP_IN_PROGRESS" || code.startsWith("AGENT_RUN_")) return 409;
   if (code === "INVALID_INPUT") return 400;
   if (code === "UNSUPPORTED") return 501;
   return 422;

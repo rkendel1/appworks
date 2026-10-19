@@ -6,7 +6,7 @@ import { tempDir } from "./helpers.js";
 
 describe("feltdb.flow is the authority for the workspace's model", () => {
   it("declares the collections, the workflow's stages and steps, and the approval actions the code runs on", () => {
-    expect(Object.keys(MODEL.collections)).toEqual(["Project", "StageEvent", "Run", "Artifact", "Approval", "Decision", "Verification", "Promotion"]);
+    expect(Object.keys(MODEL.collections)).toEqual(["Project", "StageEvent", "Run", "Artifact", "Approval", "Decision", "Verification", "Promotion", "AgentRun", "AgentTurn"]);
     expect(STAGES).toEqual(["project-selected", "repository-acquired", "revision-pinned", "integration-inspected", "capabilities-discovered", "assessment-completed", "inventory-reconciled", "candidate-selected", "extraction-planned", "awaiting-approval", "extraction-executed", "verification-completed", "ready-for-promotion", "contract-proposed", "contract-adopted", "promotion-proposed", "promotion-applied", "promotion-verified", "ready-for-review", "submitted-for-review"]);
     expect(STEPS["apply-promotion"]).toEqual({ name: "apply-promotion", from: ["promotion-proposed"], rerun: [], to: "promotion-applied", evidence: "patch", approval: "modify-integration" });
     expect(STEPS.execute).toEqual({ name: "execute", from: ["awaiting-approval"], rerun: [], to: "extraction-executed", evidence: "extraction", approval: "generate-files" });
@@ -43,7 +43,7 @@ describe("feltdb.flow is the authority for the workspace's model", () => {
       const deployed = await store.db.collection("_flow_apps").get("appworks_workspace");
       expect((deployed as { status: string }).status).toBe("active");
       const models = await store.db.collection("_flow_collection_models").find({ app: "appworks_workspace" });
-      expect(models.map((m) => (m as { name: string }).name).sort()).toEqual(["Approval", "Artifact", "Decision", "Project", "Promotion", "Run", "StageEvent", "Verification"]);
+      expect(models.map((m) => (m as { name: string }).name).sort()).toEqual(["AgentRun", "AgentTurn", "Approval", "Artifact", "Decision", "Project", "Promotion", "Run", "StageEvent", "Verification"]);
       const workflows = await store.db.collection("_flow_workflows").find({ app: "appworks_workspace" });
       expect((workflows[0] as { steps: Array<{ name: string }> }).steps.map((s) => s.name)).toContain("execute");
       const error = await store.commit([{ collection: "Run", id: "r1", value: { id: "r1", projectId: "p", secret: "x" }, create: true }]).catch((e) => e);

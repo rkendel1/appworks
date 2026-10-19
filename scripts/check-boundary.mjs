@@ -24,6 +24,9 @@
 //    real application to discover). Processes run in two places only: git, against the isolated checkout
 //    (src/repository.ts), and the approved extraction runner (src/runner.ts); only src/server.ts serves HTTP. Its schema
 //    and workflow are its feltdb.flow, and nothing below it (assessment, extraction, recipe) depends on it.
+//    Its agent runtime may also depend on @appport/schema (validating decisions) and on two model providers' SDKs,
+//    @anthropic-ai/sdk and openai, each imported by its own adapter (src/agent/providers/<provider>.ts) and nowhere
+//    else: the orchestrator, the action registry and the workflow know the provider-neutral contract only.
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -89,7 +92,8 @@ for (const lower of ["@appport/assessment", "@appport/recipe", "@appport/recipe-
 }
 const workspace = byName["@appport/workspace"];
 if (workspace) {
-  const allowed = new Set(["@appport/assessment", "@appport/extraction", "@appport/protocol", "@appport/client", "@appport/github", "@feltdb/core"]);
+  const allowed = new Set(["@appport/assessment", "@appport/extraction", "@appport/protocol", "@appport/client", "@appport/github", "@feltdb/core", "@appport/schema", "@anthropic-ai/sdk", "openai"]);
+  const providerSdks = { "@anthropic-ai/sdk": "/src/agent/providers/anthropic.ts", openai: "/src/agent/providers/openai.ts" };
   for (const [name, spec] of Object.entries({ ...workspace.manifest.dependencies, ...workspace.manifest.peerDependencies })) {
     if (!allowed.has(name)) fail(`@appport/workspace depends on ${name}; it may depend only on ${[...allowed].join(", ")}`);
     if (!byName[name] && !/^\d+\.\d+\.\d+$/.test(spec)) fail(`@appport/workspace depends on ${name}@${spec}; published dependencies are exact versions`);
@@ -108,6 +112,7 @@ if (workspace) {
     if (/child_process/.test(text) && !/\/src\/(repository|runner)\.ts$/.test(file)) fail(`${file} runs processes; only src/repository.ts (git) and src/runner.ts (the approved runner) may`);
     if (/node:(?:http|https|http2|net|tls|dgram)\b/.test(text.replace(/import type[^;]*;/g, "")) && !file.endsWith("/src/server.ts")) fail(`${file} opens network connections or servers; only src/server.ts serves HTTP (discovery goes through @appport/client, GitHub through @appport/github)`);
     if (/["']@appport\/services["']|["']express["']|createFeltDB\(/.test(text) && !file.endsWith("/src/store.ts")) fail(`${file} opens another store or service runtime; FeltDB is opened in src/store.ts only`);
+    for (const [sdk, home] of Object.entries(providerSdks)) if (new RegExp(`from\\s+["']${sdk.replace("/", "\\/")}(?:/[^"']*)?["']`).test(text) && !file.endsWith(home)) fail(`${file} imports ${sdk}; only ${home.slice(1)} (its adapter) may`);
   }
 }
 for (const lower of ["@appport/assessment", "@appport/extraction", "@appport/recipe", "@appport/recipe-distribution"]) {

@@ -10,6 +10,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { perform } from "./actions.js";
+import { agentView, performAgent, type AgentService } from "./agent/operations.js";
 import { statusOf, WorkspaceError, type Principal, type Project } from "./model.js";
 import { pageSecurityHeaders, renderPage } from "./ui.js";
 import { projectView } from "./view.js";
@@ -17,6 +18,8 @@ import type { Workspace } from "./workflow.js";
 
 export interface ServerOptions {
   workspace: Workspace;
+  /** The agent runtime and its configured agent. Without it the agent routes refuse. */
+  agents?: AgentService;
   principal: Principal;
   host?: string;
   port?: number;
@@ -27,6 +30,16 @@ const MAX_BODY = 64 * 1024;
 
 export function projectSummary(p: Project) {
   return { id: p.id, repository: `${p.repository.owner}/${p.repository.name}`, provider: p.repository.provider, ref: p.ref, sha: p.revision?.sha ?? null, stage: p.stage, condition: p.condition.state, activeRun: p.activeRun ?? null, createdBy: p.createdBy, createdAt: p.createdAt, updatedAt: p.updatedAt };
+}
+
+/** `owner/name`, or a GitHub URL (`https://github.com/owner/name[.git][/...]`): the repository, nothing typed twice. */
+export function parseRepository(text: string): { owner: string; name: string; url?: string } {
+  const t = text.trim();
+  const url = /^https:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?(?:\/.*)?$/.exec(t);
+  if (url) return { owner: url[1]!, name: url[2]!, url: `https://github.com/${url[1]}/${url[2]}` };
+  const short = /^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/.exec(t);
+  if (short) return { owner: short[1]!, name: short[2]! };
+  throw new WorkspaceError("INVALID_INPUT", "a repository is owner/name or a https://github.com/owner/name URL");
 }
 
 function send(res: ServerResponse, status: number, body: unknown) {
@@ -92,7 +105,8 @@ export function createWorkspaceServer(options: ServerOptions): { server: Server;
         if (req.method === "POST" && path === "/api/projects") {
           const body = await readJson(req);
           const s = (k: string) => (typeof body[k] === "string" && body[k] ? (body[k] as string) : undefined);
-          const created = await ws.createProject(principal, { provider: (s("provider") ?? "github") as "github" | "git", owner: s("owner") ?? "", name: s("name") ?? "", ref: s("ref") ?? "", ...(s("url") ? { url: s("url")! } : {}), ...(s("fetchFrom") ? { fetchFrom: s("fetchFrom")! } : {}), ...(s("readCredential") ? { readCredential: s("readCredential")! } : {}), ...(s("writeCredential") ? { writeCredential: s("writeCredential")! } : {}) });
+          const named = s("repository") ? parseRepository(s("repository")!) : { owner: s("owner") ?? "", name: s("name") ?? "" };
+          const created = await ws.createProject(principal, { provider: (s("provider") ?? "github") as "github" | "git", owner: named.owner, name: named.name, ...(named.url && !s("url") ? { url: named.url } : {}), ref: s("ref") ?? "", ...(s("url") ? { url: s("url")! } : {}), ...(s("fetchFrom") ? { fetchFrom: s("fetchFrom")! } : {}), ...(s("readCredential") ? { readCredential: s("readCredential")! } : {}), ...(s("writeCredential") ? { writeCredential: s("writeCredential")! } : {}) });
           return send(res, 201, projectSummary(created));
         }
         let m = /^\/api\/projects\/([A-Za-z0-9_]+)$/.exec(path);
@@ -102,6 +116,21 @@ export function createWorkspaceServer(options: ServerOptions): { server: Server;
           const found = await ws.artifact(principal, decodeURIComponent(m[2]!));
           if (!found || found.record.projectId !== m[1]) throw new WorkspaceError("NOT_FOUND", "no such artifact");
           return send(res, 200, { record: found.record, body: found.body });
+        }
+        const agents = () => {
+          if (!options.agents) throw new WorkspaceError("AGENT_NOT_CONFIGURED", "this workspace server has no agent runtime");
+          return options.agents;
+        };
+        m = /^\/api\/projects\/([A-Za-z0-9_]+)\/agent$/.exec(path);
+        if (req.method === "GET" && m) return send(res, 200, await agentView(agents(), principal, m[1]!));
+        m = /^\/api\/projects\/([A-Za-z0-9_]+)\/agent\/(start|stop|resume)$/.exec(path);
+        if (req.method === "POST" && m) {
+          const performed = await performAgent(agents(), principal, m[1]!, m[2]!, await readJson(req));
+          if (performed.kind === "started") {
+            performed.done.catch(() => {}); // recorded on the run; the page reads it back
+            return send(res, 202, { run: performed.run });
+          }
+          return send(res, 200, performed.result);
         }
         m = /^\/api\/projects\/([A-Za-z0-9_]+)\/actions\/([a-z-]+)$/.exec(path);
         if (req.method === "POST" && m) {
