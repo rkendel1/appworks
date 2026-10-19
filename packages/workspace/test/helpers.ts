@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { assessRepository } from "@appport/assessment";
@@ -110,8 +110,21 @@ export async function openWorkspace(options: Partial<WorkspaceOptions> & { home?
     ...(options.worker ? { worker: options.worker } : {}),
     ...(options.fetch ? { fetch: options.fetch } : {}),
     ...(options.runnerTimeoutMs ? { runnerTimeoutMs: options.runnerTimeoutMs } : {}),
-    ...(options.faultPoint ? { faultPoint: options.faultPoint } : {})
+    ...(options.faultPoint ? { faultPoint: options.faultPoint } : {}),
+    installPackages: options.installPackages ?? linkPackages
   });
+}
+
+/**
+ * Tests install an AppPort integration's packages offline: its node_modules is this package's own (which holds the
+ * pinned @appport/sdk), linked, never fetched.
+ */
+export async function linkPackages(directory: string) {
+  const manifest = JSON.parse(readFileSync(join(directory, "package.json"), "utf8")) as { dependencies: Record<string, string> };
+  const own = JSON.parse(readFileSync(join(import.meta.dirname, "..", "package.json"), "utf8")) as { devDependencies: Record<string, string> };
+  for (const [name, version] of Object.entries(manifest.dependencies)) if (own.devDependencies[name] !== version) return { exitCode: 1, signal: null, timedOut: false, output: `${name}@${version} is not available offline` };
+  if (!existsSync(join(directory, "node_modules"))) symlinkSync(join(import.meta.dirname, "..", "node_modules"), join(directory, "node_modules"), "dir");
+  return { exitCode: 0, signal: null, timedOut: false, output: "linked" };
 }
 
 /** Runs one step to completion and returns the project. */

@@ -27,6 +27,8 @@ export interface ResolvedRevision {
   fetchUrl: string;
   defaultBranch?: string;
   defaultBranchSha?: string;
+  /** The branch a `HEAD` ref (the default branch) resolved through. */
+  ref?: string;
   onDefaultBranch: "yes" | "no" | "unknown";
   note?: string;
 }
@@ -103,7 +105,8 @@ export function githubProvider(options: { applicationId?: string } = {}): Reposi
       const target = { connectionId, owner: repository.owner, repository: repository.name };
       try {
         const repo = await github.repositories.get(target, invocation);
-        const source = await github.repositories.source({ ...target, ref }, invocation);
+        const wanted = ref === "HEAD" && repo.defaultBranch ? repo.defaultBranch : ref;
+        const source = await github.repositories.source({ ...target, ref: wanted }, invocation);
         if (!SHA.test(source.commit)) throw new WorkspaceError("REF_NOT_FOUND", `GitHub resolved ${ref} to ${source.commit}, which is not a commit SHA`);
         const defaultBranch = repo.defaultBranch;
         let defaultBranchSha: string | undefined;
@@ -119,7 +122,7 @@ export function githubProvider(options: { applicationId?: string } = {}): Reposi
             else note = `${source.commit.slice(0, 12)} is not among the latest ${recent.length} commits of ${defaultBranch}; that it is merged into ${defaultBranch} is not established`;
           }
         }
-        return { sha: source.commit, fetchUrl: `https://github.com/${repository.owner}/${repository.name}.git`, ...(defaultBranch ? { defaultBranch } : {}), ...(defaultBranchSha ? { defaultBranchSha } : {}), onDefaultBranch, ...(note ? { note } : {}) };
+        return { sha: source.commit, fetchUrl: `https://github.com/${repository.owner}/${repository.name}.git`, ...(wanted !== ref ? { ref: wanted } : {}), ...(defaultBranch ? { defaultBranch } : {}), ...(defaultBranchSha ? { defaultBranchSha } : {}), onDefaultBranch, ...(note ? { note } : {}) };
       } catch (error) {
         throw providerError(error, ref);
       }
@@ -166,6 +169,7 @@ export function gitProvider(): RepositoryProvider {
       const defaultBranchSha = /^([0-9a-f]{40})\tHEAD$/m.exec(head)?.[1];
       let sha: string | undefined;
       if (SHA.test(ref)) sha = ref;
+      else if (ref === "HEAD") sha = defaultBranchSha;
       else {
         const listed = await git(["ls-remote", from, `refs/heads/${ref}`, `refs/tags/${ref}`], {});
         sha = /^([0-9a-f]{40})\t/m.exec(listed)?.[1];
@@ -181,7 +185,7 @@ export function gitProvider(): RepositoryProvider {
         onDefaultBranch = ancestor ? "yes" : "no";
         if (!ancestor) note = `${sha.slice(0, 12)} is not in the history of ${defaultBranch ?? "the default branch"} (${defaultBranchSha.slice(0, 12)})`;
       } else if (onDefaultBranch !== "yes") note = `whether ${sha.slice(0, 12)} is merged into ${defaultBranch ?? "the default branch"} is not established`;
-      return { sha, fetchUrl: from, ...(defaultBranch ? { defaultBranch } : {}), ...(defaultBranchSha ? { defaultBranchSha } : {}), onDefaultBranch, ...(note ? { note } : {}) };
+      return { sha, fetchUrl: from, ...(ref === "HEAD" && defaultBranch ? { ref: defaultBranch } : {}), ...(defaultBranch ? { defaultBranch } : {}), ...(defaultBranchSha ? { defaultBranchSha } : {}), onDefaultBranch, ...(note ? { note } : {}) };
     }
   };
 }

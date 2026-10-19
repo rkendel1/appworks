@@ -35,7 +35,7 @@ Published under the `@appport/*` ecosystem scope; owned, versioned and released 
 | [`@appport/recipe`](packages/recipe) | recipe source model, expressions, validation, locks, packages, JSON Schemas | `@appport/protocol` 1.2.0, `@appport/schema` 1.1.1, `@appport/integration` 1.2.0 (published); tested against `@appport/core` 1.3.0 |
 | [`@appport/recipe-distribution`](packages/recipe-distribution) | recipe package ↔ `distribution/1` release manifest; acceptance of acquired bytes | `@appport/recipe`, `@distribution-protocol/protocol` 1.0.0 |
 | [`@appport/assessment`](packages/assessment) | static assessment of an existing repository: evidence, capability candidates, readiness, a recommended exposure candidate (`appworks-assess`) | `@appport/protocol` 1.2.0 |
-| [`@appport/workspace`](packages/workspace) | the project workspace and orchestrator (private, not published): FeltDB-backed workflow from a pinned revision to a verified extraction, contract adoption and a verified, reviewable integration change; web workspace and `appworks project` / `appworks serve` | `@appport/extraction`, `@appport/assessment`, `@appport/client` 1.1.3, `@appport/github` 1.0.2, `@appport/protocol` 1.2.0, `@feltdb/core` 0.12.0 |
+| [`@appport/workspace`](packages/workspace) | the project workspace and orchestrator (private, not published): FeltDB-backed workflow from a pinned revision to a verified extraction, contract adoption and a verified, reviewable integration change; web workspace and `appworks project` / `appworks serve`; the agent runtime (`appworks agent`) with Anthropic, OpenAI and deterministic agents | `@appport/extraction`, `@appport/assessment`, `@appport/client` 1.1.3, `@appport/github` 1.0.2, `@appport/protocol` 1.2.0, `@appport/schema` 1.1.1, `@feltdb/core` 0.12.0, `@anthropic-ai/sdk` 0.135.0, `openai` 7.39.0 |
 | [`@appport/extraction`](packages/extraction) | extraction artifacts: eligibility, contract and mapping checks, adapter identity, fulfillment declarations, per-behavior verification records, revision rules; the `appworks` CLI | `@appport/assessment`, `@appport/protocol` 1.2.0, `@appport/schema` 1.1.1 |
 
 Adapters and their verification suites live in private, unpublished packages under [`extractions/`](extractions).
@@ -90,8 +90,32 @@ pnpm appworks project list          # the same workspace from the CLI (any `appw
 ```
 
 State lives in `--home` (`APPWORKS_HOME`, default `~/.appworks`); reviewed extractions are read from `./extractions`. Open the printed
-URL, create a project from a repository and a ref, and follow the workspace's next actions. Every action the page offers is also
+URL, create a project from a repository (the ref defaults to its default branch), and run the agent or follow the workspace's next actions. Every action the page offers is also
 `pnpm appworks project <action> <id>`.
+
+### The agent
+
+An agent can carry a project through the workflow by itself: it proposes one action at a time, and AppWorks validates and runs each
+through the same workflow, authority and approvals, pausing whenever a person must approve something.
+
+```sh
+APPWORKS_AGENT_PROVIDER=anthropic APPWORKS_AGENT_MODEL=<model> pnpm appworks agent check   # shows the agent; never the key
+pnpm appworks agent run <project>                     # runs until a blocker or an approval; prints every decision and result
+pnpm appworks project approve <project> --action generate-files --subject <subject printed by the run>
+pnpm appworks agent resume <project>                  # [--answer "..."] for a question; [--switch-agent --agent openai --model <m>]
+pnpm appworks agent status <project>    |   pnpm appworks agent stop <project>
+pnpm appworks agent run <project> --agent deterministic   # no model: follows the advisor
+```
+
+Providers: `anthropic` (`ANTHROPIC_API_KEY`), `openai` (`OPENAI_API_KEY`), `deterministic`. Keys come from the environment or an
+optional `.env.local` in the working directory (or `--env-file`), which is read and never printed or stored. The web workspace has the
+same controls in its Agent section. Discovery finds a running application from the ports its source names, so no origin needs typing.
+A repository without an AppPort integration gets one: the agent proposes an AppPort application in a new directory and, once a person
+approves it, AppWorks adds it to an isolated worktree, installs its packages (scripts disabled), starts it and discovers it, then
+continues.
+`APPWORKS_LIVE_ANTHROPIC_MODEL=<m>` / `APPWORKS_LIVE_OPENAI_MODEL=<m>` with a key enable the live adapter checks in
+`test/agent-conformance.test.ts`; `APPWORKS_AIDER_E2E=1` runs the agent on Aider-AI/aider (network: it installs AppPort there,
+discovers it, and stops where the evidence does: Python is not assessed, so there is no candidate).
 
 `APPWORKS_MEMOS_E2E=1 APPWORKS_MEMOS_REPO=<checkout> pnpm vitest run packages/workspace/test/memos-e2e.test.ts` runs the same Memos
 through the project workspace end to end (acquisition through `@appport/github`, discovery of the running bridge, assessment,

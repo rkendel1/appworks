@@ -5,7 +5,7 @@ import { WorkspaceError, type Principal } from "./model.js";
 import type { Workspace } from "./workflow.js";
 
 /** Actions that start a step or a gated action (a run), and actions that complete at once. */
-export const RUN_ACTIONS = ["acquire", "pin", "inspect", "discover", "assess", "reconcile", "select", "plan", "request-approval", "execute", "verify", "ready", "propose-contract", "adopt-contract", "propose-promotion", "apply-promotion", "verify-promotion", "prepare-review", "submit-review", "commit", "pull-request", "push", "promote", "resume"] as const;
+export const RUN_ACTIONS = ["acquire", "pin", "inspect", "propose-integration", "install-integration", "discover", "assess", "reconcile", "select", "plan", "request-approval", "execute", "verify", "ready", "propose-contract", "adopt-contract", "propose-promotion", "apply-promotion", "verify-promotion", "prepare-review", "submit-review", "commit", "pull-request", "push", "promote", "resume"] as const;
 export const IMMEDIATE_ACTIONS = ["approve", "cancel", "assert-match", "approval-subject"] as const;
 export const ACTIONS: readonly string[] = [...RUN_ACTIONS, ...IMMEDIATE_ACTIONS];
 

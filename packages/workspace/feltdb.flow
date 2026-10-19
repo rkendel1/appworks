@@ -13,11 +13,12 @@ app appworks_workspace {
     repository: json
     ref: text
     revision: json?
-    stage: enum(project-selected, repository-acquired, revision-pinned, integration-inspected, capabilities-discovered, assessment-completed, inventory-reconciled, candidate-selected, extraction-planned, awaiting-approval, extraction-executed, verification-completed, ready-for-promotion, contract-proposed, contract-adopted, promotion-proposed, promotion-applied, promotion-verified, ready-for-review, submitted-for-review)
+    stage: enum(project-selected, repository-acquired, revision-pinned, integration-inspected, integration-proposed, integration-installed, capabilities-discovered, assessment-completed, inventory-reconciled, candidate-selected, extraction-planned, awaiting-approval, extraction-executed, verification-completed, ready-for-promotion, contract-proposed, contract-adopted, promotion-proposed, promotion-applied, promotion-verified, ready-for-review, submitted-for-review)
     condition: json
     failure: json?
     current: json
     activeRun: text?
+    agentRun: text?
     history: integer
     index createdBy using hash(createdBy)
   }
@@ -59,7 +60,7 @@ app appworks_workspace {
   collection Artifact {
     id: text
     projectId: text
-    kind: enum(integration, discovery, assessment, inventory, plan, extraction, verification-log, adoption, promotion, patch, promotion-verification, promotion-log)
+    kind: enum(integration, integration-proposal, integration-install, discovery, assessment, inventory, plan, extraction, verification-log, adoption, promotion, patch, promotion-verification, promotion-log)
     fileDigest: text
     digest: text?
     format: text?
@@ -157,6 +158,54 @@ app appworks_workspace {
     index projectId using hash(projectId)
   }
 
+  // An agent run: one agent (its identity recorded, never a credential) proposing actions on one project, one decision
+  // per turn. The project's `agentRun` names the run that holds it, so two agent runs never drive the same project. The
+  // lease is renewed while a worker carries the run; a run whose lease expired was interrupted and may be resumed.
+  // Nothing an agent says is evidence: the workflow's own runs and records are.
+  collection AgentRun {
+    id: text
+    projectId: text
+    status: enum(running, paused, completed, blocked, exhausted, failed, cancelled)
+    agent: json
+    task: text
+    limits: json
+    startedAt: datetime
+    startedBy: text
+    updatedAt: datetime
+    owner: text?
+    leaseExpiresAt: datetime?
+    turns: integer
+    cancelRequested: boolean?
+    pause: json?
+    outcome: json?
+    usage: json?
+    switches: json?
+    error: json?
+    finishedAt: datetime?
+    index projectId using hash(projectId)
+  }
+
+  // One turn of an agent run: the decision the agent proposed, its validation, and what AppWorks actually did. A turn
+  // is recorded as `executing` before its action runs, so a resumed run reconciles the action's effect from the
+  // workflow's own records instead of repeating it.
+  collection AgentTurn {
+    id: text
+    runId: text
+    projectId: text
+    turn: integer
+    at: datetime
+    status: enum(executing, succeeded, failed, refused, invalid, paused, asked, answered, finished, interrupted)
+    decision: json?
+    problems: json?
+    action: text?
+    workspaceRun: text?
+    result: json?
+    usage: json?
+    attempts: integer
+    finishedAt: datetime?
+    index runId using hash(runId)
+  }
+
   // One step per transition. `from` lists the stages a step starts from, `rerun` the later stages it may be run
   // again from (clearing what later stages derived), `to` the stage it reaches, `evidence` the current-evidence slot
   // it fills and `approval` the approval its action boundary requires. Stages are the steps' `to`, in order.
@@ -177,8 +226,23 @@ app appworks_workspace {
       to integration-inspected
       evidence integration
     }
-    step discover {
+    // Installing AppPort, for a revision that has no AppPort integration: propose an AppPort application of its own in a
+    // new directory, then, approved, add it to an isolated worktree, install its packages and check that it serves
+    // discovery. A revision with an integration goes straight to discovery.
+    step propose-integration {
       from integration-inspected
+      rerun integration-proposed
+      to integration-proposed
+      evidence integrationProposal
+    }
+    step install-integration {
+      from integration-proposed
+      to integration-installed
+      evidence integrationInstall
+      approval modify-integration
+    }
+    step discover {
+      from integration-inspected integration-installed
       rerun capabilities-discovered
       to capabilities-discovered
       evidence discovery

@@ -100,9 +100,8 @@
       submitLabel: 'Create project',
       children: [
         S.dom.Select({ id: 'create-provider', name: 'provider', label: 'Provider', value: 'github', options: [{ value: 'github', label: 'GitHub (@appport/github)' }, { value: 'git', label: 'Git remote or local mirror' }] }),
-        S.dom.TextField({ id: 'create-owner', name: 'owner', label: 'Owner', required: true }),
-        S.dom.TextField({ id: 'create-name', name: 'name', label: 'Repository', required: true }),
-        S.dom.TextField({ id: 'create-ref', name: 'ref', label: 'Branch, tag or commit', required: true, hint: 'Resolved to one commit and pinned when the repository is acquired.' }),
+        S.dom.TextField({ id: 'create-repository', name: 'repository', label: 'Repository', required: true, placeholder: 'owner/name or https://github.com/owner/name' }),
+        S.dom.TextField({ id: 'create-ref', name: 'ref', label: 'Branch, tag or commit (optional)', hint: 'Leave empty for the repository\'s default branch. Resolved to one commit and pinned when the repository is acquired.' }),
         S.dom.TextField({ id: 'create-read', name: 'readCredential', label: 'Read credential (optional)', placeholder: 'env:GITHUB_TOKEN', hint: 'A reference to an environment variable, never the token itself. Public repositories need none.' }),
         S.dom.TextField({ id: 'create-write', name: 'writeCredential', label: 'Write credential (optional)', placeholder: 'env:GITHUB_WRITE_TOKEN', hint: 'Used only by an approved pull request. Kept separate from the read credential.' }),
         S.dom.TextField({ id: 'create-fetch', name: 'fetchFrom', label: 'Fetch from (git only, optional)', hint: 'A local mirror of the repository; the identity stays the GitHub URL.' }),
@@ -141,11 +140,15 @@
     async function refresh() {
       const mine = ++latest;
       try {
-        const view = await request('/api/projects/' + encodeURIComponent(id));
+        const [view, agent] = await Promise.all([
+          request('/api/projects/' + encodeURIComponent(id)),
+          request('/api/projects/' + encodeURIComponent(id) + '/agent').catch((error) => ({ unavailable: error })),
+        ]);
         if (mine !== latest) return;
-        slot.replaceChildren(...render(view));
+        slot.replaceChildren(...render(view, agent));
         clearTimeout(timer);
-        if (view.project.activeRun && !view.project.activeRun.expired) timer = setTimeout(refresh, 2000);
+        const agentRunning = agent && agent.current && agent.current.run.status === 'running' && !agent.current.run.interrupted;
+        if ((view.project.activeRun && !view.project.activeRun.expired) || agentRunning) timer = setTimeout(refresh, 2000);
       } catch (error) {
         if (mine !== latest) return;
         slot.replaceChildren(S.dom.ErrorPanel({ title: 'The project could not be read', message: error.message, code: error.code, onRetry: refresh }));
@@ -194,7 +197,86 @@
       }
     }
 
-    function render(v) {
+    async function agentAct(action, input) {
+      outcome.replaceChildren();
+      try {
+        const result = await request('/api/projects/' + encodeURIComponent(id) + '/agent/' + action, 'POST', input || {});
+        outcome.replaceChildren(el('p', { class: 'appworks-outcome__ok' }, result && result.run && action !== 'stop' ? 'Agent ' + action + ': ' + result.run + '.' : 'Stop requested.'));
+      } catch (error) {
+        outcome.replaceChildren(S.dom.ErrorPanel({ title: 'Agent ' + action + ' was refused', message: error.message, code: error.code }));
+      }
+      await refresh();
+    }
+
+    const AGENT = { running: 'progress', paused: 'attention', completed: 'positive', blocked: 'attention', exhausted: 'attention', failed: 'critical', cancelled: 'neutral', interrupted: 'attention' };
+    const TURN = { executing: 'progress', succeeded: 'positive', failed: 'critical', refused: 'attention', invalid: 'critical', paused: 'attention', asked: 'attention', answered: 'neutral', finished: 'neutral', interrupted: 'attention' };
+    const describe = (a) => a.provider + (a.model ? ' ' + a.model : '') + ' (' + a.implementation + ')';
+
+    function renderAgent(a) {
+      if (!a || a.unavailable) return section('agent', 'Agent', S.dom.Unavailable({ status: 'unavailable', title: 'No agent runtime', reason: a && a.unavailable ? a.unavailable.message : 'The agent view could not be read.' }));
+      const children = [];
+      const configured = a.configured.error
+        ? S.dom.Unavailable({ status: 'unavailable', title: 'No agent configured', reason: a.configured.error.message })
+        : S.dom.MetadataList({ items: [
+          { label: 'Configured agent', value: a.configured.provider + (a.configured.model ? ' · ' + a.configured.model : '') },
+          { label: 'Implementation', value: a.configured.implementation, mono: true },
+          { label: 'Limits', value: a.configured.limits.maxTurns + ' turns · ' + Math.round(a.configured.limits.decisionTimeoutMs / 1000) + 's per decision · ' + a.configured.limits.maxRetries + ' retries' },
+          ...(a.configured.key ? [{ label: 'Key', value: a.configured.key.variable + (a.configured.key.set ? ' is set' : ' is NOT set') }] : []),
+        ] });
+      children.push(configured);
+      const c = a.current;
+      const r = c && c.run;
+      const buttons = [];
+      const holding = r && (r.status === 'running' || r.status === 'paused');
+      if (!holding && !a.configured.error) buttons.push(S.dom.Button({ label: 'Run agent', variant: 'primary', attrs: { 'data-agent': 'start' }, onClick: () => agentAct('start', {}) }));
+      if (r && r.status === 'running' && !r.interrupted && !r.cancelRequested) buttons.push(S.dom.Button({ label: 'Stop agent', variant: 'ghost', attrs: { 'data-agent': 'stop' }, onClick: () => agentAct('stop', { run: r.id, reason: 'stopped from the web workspace' }) }));
+      if (r && (r.status === 'paused' || r.interrupted) && !a.configured.error) {
+        const switching = r.agent.provider !== a.configured.provider || (r.agent.model || '') !== (a.configured.model || '');
+        buttons.push(S.dom.Button({ label: switching ? 'Resume with ' + a.configured.provider : 'Resume agent', variant: 'primary', attrs: { 'data-agent': 'resume' }, onClick: async () => {
+          if (r.pause && r.pause.kind === 'question') {
+            await S.formDialog({ id: 'agent-answer', title: 'Answer the agent', description: r.pause.question, submitLabel: 'Answer and resume', fields: [{ name: 'answer', label: 'Answer', required: true }], action: (values) => agentAct('resume', { run: r.id, answer: values.answer, switchAgent: switching }) });
+            return;
+          }
+          if (switching) {
+            await S.confirmAction({ id: 'agent-switch', title: 'Switch the agent?', description: 'This run was carried by ' + describe(r.agent) + '. The configured agent is ' + a.configured.provider + (a.configured.model ? ' ' + a.configured.model : '') + '.', consequences: ['The switch is recorded on the run.', 'The new agent decides from the same recorded history.'], confirmLabel: 'Switch and resume', action: () => agentAct('resume', { run: r.id, switchAgent: true }) });
+            return;
+          }
+          await agentAct('resume', { run: r.id });
+        } }));
+        if (r.status === 'paused' || r.interrupted) buttons.push(S.dom.Button({ label: 'Stop agent', variant: 'ghost', attrs: { 'data-agent': 'stop' }, onClick: () => agentAct('stop', { run: r.id, reason: 'stopped from the web workspace' }) }));
+      }
+      if (buttons.length) children.push(el('div', { class: 'appworks-action' }, buttons));
+      if (!r) {
+        children.push(pending('No agent run yet', 'Running the agent carries this project through the workflow, one validated decision at a time, until a blocker or an approval only a person can grant.'));
+        return section('agent', 'Agent', children, a.note);
+      }
+      children.push(S.dom.MetadataList({ items: [
+        { label: 'Run', value: r.id, mono: true },
+        { label: 'Status', value: status({ tone: AGENT[r.interrupted ? 'interrupted' : r.status] || 'unknown', label: r.interrupted ? 'interrupted' : r.status + (r.cancelRequested ? ' (stop requested)' : '') }) },
+        { label: 'Agent', value: describe(r.agent) },
+        { label: 'Turns', value: r.turns + ' of ' + r.limits.maxTurns },
+        ...(r.usage && r.usage.inputTokens ? [{ label: 'Tokens', value: r.usage.inputTokens + ' in · ' + r.usage.outputTokens + ' out' }] : []),
+        { label: 'Started', value: when(r.startedAt) },
+        ...(r.outcome ? [{ label: 'Outcome', value: r.outcome.reason + ' · project at ' + r.outcome.stage + ' (' + r.outcome.condition + ')' }] : []),
+      ] }));
+      for (const sw of r.switches || []) children.push(el('p', { class: 'appworks-muted' }, 'Agent switched after turn ' + sw.afterTurn + ' by ' + sw.by + ': ' + describe(sw.from) + ' → ' + describe(sw.to) + '.'));
+      if (r.pause && r.pause.kind === 'approval') children.push(S.dom.Unavailable({ status: 'partial', title: 'Waiting for approval: ' + r.pause.approval, reason: r.pause.action + ' needs a person\'s ' + r.pause.approval + ' approval' + (r.pause.subject ? ' of subject ' + r.pause.subject : '') + '. Approve it under Next actions, then resume the agent.' }));
+      if (r.pause && r.pause.kind === 'question') children.push(S.dom.Unavailable({ status: 'partial', title: 'The agent asks', reason: r.pause.question }));
+      if (r.interrupted) children.push(S.dom.Unavailable({ status: 'partial', title: 'Interrupted', reason: 'The worker carrying this run stopped renewing its lease. Resuming reconciles the last action from the workflow\'s records; nothing is repeated blindly.' }));
+      if (r.error) children.push(S.dom.ErrorPanel({ title: 'The agent run failed', message: r.error.message, code: r.error.code }));
+      for (const b of (r.outcome && r.outcome.blockers) || []) children.push(S.dom.Unavailable({ status: 'partial', title: 'Blocker (reported by the agent)', reason: b }));
+      children.push(table('Agent turns', [{ id: 'turn', header: '#' }, { id: 'status', header: 'Status' }, { id: 'decision', header: 'Decision' }, { id: 'rationale', header: 'Agent\'s rationale (not evidence)' }, { id: 'result', header: 'Recorded result' }], c.turns.slice().reverse().map((t) => {
+        const d = t.decision;
+        const what = !d ? '(no readable decision)' : d.kind === 'action' ? d.action + (Object.keys(d.arguments || {}).length ? ' ' + JSON.stringify(d.arguments) : '') : d.kind === 'ask' ? 'ask: ' + d.question : 'finish: ' + d.outcome;
+        return { key: t.id, cells: {
+          turn: String(t.turn), status: tone(t.status, TURN), decision: code(what), rationale: d ? d.rationale : '',
+          result: t.result ? [t.result.summary + (t.result.class && t.result.class !== 'none' ? ' (' + t.result.class + ')' : ''), ...(t.result.evidence || []).map((e) => [' ', code(e)])] : (t.problems || []).map((p) => p.code + ': ' + p.message).join('; '),
+        } };
+      }), 'No turns yet'));
+      return section('agent', 'Agent', children, a.note);
+    }
+
+    function render(v, agent) {
       const p = v.project;
       const out = [];
       const rev = p.revision;
@@ -232,6 +314,8 @@
           : null,
         el('p', { class: 'appworks-muted' }, v.next.note),
       ]));
+
+      out.push(renderAgent(agent));
 
       out.push(section('repository', 'Repository and revision', S.dom.MetadataList({ items: [
         { label: 'Repository', value: p.repository.url, mono: true },
@@ -272,7 +356,18 @@
           claims: c.claims.length ? c.claims.map((x) => x.claim.contract + ' ' + x.claim.capability + '@' + x.claim.version + ': ' + x.evaluation).join('; ') : 'none',
         } })), d.outcome === 'no-integration' ? 'No AppPort integration: nothing to discover' : 'No capabilities discovered')]
         : [pending('Not discovered', 'Discovery asks a running instance, through AppPort\'s client, what it advertises.')];
-      out.push(section('integration', 'AppPort integration', [...integration, el('h3', {}, 'Discovery'), ...discovery]));
+      const inst = v.installation;
+      const installation = inst ? [el('h3', {}, 'Installing AppPort'), S.dom.MetadataList({ items: [
+        { label: 'State', value: tone(inst.state, { proposed: 'attention', installed: 'positive' }) },
+        { label: 'Application', value: inst.application.id, mono: true },
+        { label: 'Directory', value: inst.directory + '/ (new; no existing file changes)', mono: true },
+        { label: 'Packages', value: Object.entries(inst.packages).map(([k, x]) => k + '@' + x).join(', ') + ' (lifecycle scripts disabled)' },
+        { label: 'Proposal', value: inst.digest, mono: true },
+        ...(inst.install ? [{ label: 'Worktree', value: inst.install.worktree, mono: true }, { label: 'Checked', value: inst.install.verified ? 'serves AppPort discovery' + (inst.install.discovery && inst.install.discovery.state ? ' (' + inst.install.discovery.state + ')' : '') : 'not verified' }] : []),
+      ] }), el('p', { class: 'appworks-muted' }, inst.description),
+      table('Files to add', [{ id: 'path', header: 'File' }, { id: 'role', header: 'Role' }, { id: 'sha', header: 'SHA-256' }], inst.files.map((f) => ({ key: f.path, cells: { path: code(f.path), role: f.role, sha: code(f.sha256.slice(0, 19) + '…') } }))),
+      inst.install ? el('details', { class: 'appworks-diff' }, [el('summary', {}, 'Patch'), el('pre', {}, inst.install.patch)]) : null] : [];
+      out.push(section('integration', 'AppPort integration', [...integration, ...installation, el('h3', {}, 'Discovery'), ...discovery]));
 
       const a = v.assessment;
       out.push(section('assessment', 'Assessment', a ? [
