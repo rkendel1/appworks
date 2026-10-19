@@ -76,7 +76,7 @@ export interface CliEnvironment {
   onServe?: (origin: string, close: () => Promise<void>) => void;
 }
 
-export async function openWorkspace(options: Record<string, string | true>, environment: CliEnvironment = {}): Promise<{ ws: Workspace; principal: Principal }> {
+export async function openWorkspace(options: Record<string, string | true>, environment: CliEnvironment = {}): Promise<{ ws: Workspace; principal: Principal; extractions?: string }> {
   const env = environment.env ?? process.env;
   const home = resolve(String(options.home ?? environment.home ?? env.APPWORKS_HOME ?? join(homedir(), ".appworks")));
   const extractions = String(options.extractions ?? environment.extractions ?? env.APPWORKS_EXTRACTIONS ?? resolve("extractions"));
@@ -85,7 +85,7 @@ export async function openWorkspace(options: Record<string, string | true>, envi
   const policy = existsSync(policyPath) ? (JSON.parse(readFileSync(policyPath, "utf8")) as Record<string, string[]>) : { [principal.id]: ["*"] };
   const leaseMs = Number(env.APPWORKS_LEASE_MS ?? 60_000);
   const ws = await Workspace.open({ home, authority: localAuthority(policy), credentials: environmentCredentials(env), providers: { github: githubProvider(), git: gitProvider() }, leaseMs: Number.isFinite(leaseMs) && leaseMs >= 1_000 ? leaseMs : 60_000, ...(existsSync(extractions) ? { extractionsRoot: extractions } : {}) });
-  return { ws, principal };
+  return { ws, principal, ...(existsSync(extractions) ? { extractions } : {}) };
 }
 
 function showText(v: ProjectView): string[] {
@@ -147,6 +147,7 @@ export async function main(argv: string[], io: CliIO = { out: (t) => process.std
       const server = createWorkspaceServer({ workspace: ws, principal: opened.principal, host: String(options.host ?? "127.0.0.1"), port: Number(options.port ?? 4300) });
       const origin = await server.listen();
       io.out(`AppWorks workspace on ${origin} (loopback only), acting as ${opened.principal.id}`);
+      io.out(`  state: ${opened.ws.home}; extractions: ${opened.extractions ?? "none"}. Press Ctrl-C to stop.`);
       const opened_ws = ws;
       ws = undefined; // closed with the server
       const close = async () => {

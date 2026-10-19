@@ -5,6 +5,8 @@ acquisition, AppPort integration inspection, capability discovery, assessment, r
 approval, extraction, verification and readiness for promotion, and records every step in FeltDB. Specification:
 [`spec/workspace-1.md`](../../spec/workspace-1.md).
 
+From the repository: `pnpm serve` (builds, then `appworks serve`) and `pnpm appworks <command>`.
+
 ```sh
 appworks serve                                   # the web workspace on http://127.0.0.1:4300 (loopback only)
 appworks project create --github rkendel1/memos --ref e0ce8569589b2eccafd13e262ea3e320251858f2

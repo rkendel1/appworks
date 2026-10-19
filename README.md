@@ -80,6 +80,19 @@ verifies the extraction's declaration and behaviors against it, requires `extrac
 reproduce and every known adapter defect to be caught. CI does both in
 its `memos` job (Go from the checkout's `go.mod`).
 
+### The web workspace
+
+```sh
+pnpm install
+pnpm serve                          # builds, then serves the workspace on http://127.0.0.1:4300 (loopback only)
+pnpm serve --port 4400 --home ./my-workspace
+pnpm appworks project list          # the same workspace from the CLI (any `appworks` command: project, serve, assess, ...)
+```
+
+State lives in `--home` (`APPWORKS_HOME`, default `~/.appworks`); reviewed extractions are read from `./extractions`. Open the printed
+URL, create a project from a repository and a ref, and follow the workspace's next actions. Every action the page offers is also
+`pnpm appworks project <action> <id>`.
+
 `APPWORKS_MEMOS_E2E=1 APPWORKS_MEMOS_REPO=<checkout> pnpm vitest run packages/workspace/test/memos-e2e.test.ts` runs the same Memos
 through the project workspace end to end (acquisition through `@appport/github`, discovery of the running bridge, assessment,
 reconciliation, approval, the extraction runner, verification); `appworks serve` shows the result.
