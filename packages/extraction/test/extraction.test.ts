@@ -1,5 +1,5 @@
 /** Creation, refusal, integrity and revision rules of appport.capability-extraction/1, on a synthetic repository. */
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { assessmentDigest, evidenceId, type ApplicationAssessment, type Evidence } from "@appport/assessment";
@@ -47,7 +47,7 @@ describe("creating an extraction", () => {
     expect(treeHash(root)).toBe(before);
     expect(one).toMatchObject({ stage: "implemented", identity: { name: "note.get", revision: 1 }, source: { revision: REVISION, operation: { fullMethod: "/notes.v1.NoteService/GetNote", http: "GET /v1/{name=notes/*}" } } });
     expect(one.assessment).toMatchObject({ digest: a.digest, candidate: { id: CANDIDATE } });
-    expect(one.adapter!.files.map((f) => f.path)).toEqual(["adapter.mjs"]);
+    expect(one.adapter!.files.map((f) => f.path)).toEqual(["adapter.mjs", "fulfillment.json"]);
     expect(one.adapter!.boundary.files.map((f) => f.path)).toEqual(["bridge/kit.mjs"]);
     expect(one.verification.records.map((r) => r.status)).toEqual(REQUIRED_BEHAVIORS.map(() => "not-run"));
     expect(one.findings.map((f) => f.code)).toEqual(["VERIFICATION_INCOMPLETE"]);
@@ -169,8 +169,8 @@ describe("verifying an extraction", () => {
     expect(verifyExtractionAt(x, { repository: root, planDirectory: dir }).ok).toBe(true);
     expect(codes(x, { repositoryRevision: "b".repeat(40) })).toEqual(["SOURCE_REVISION"]);
     expect(codes(x, { boundaryFiles: { "bridge/kit.mjs": "changed" } })).toEqual(["BOUNDARY_MISMATCH"]);
-    expect(codes(x, { adapterFiles: { "adapter.mjs": "export const adapter = 2;\n" } })).toEqual(["ADAPTER_MISMATCH"]);
-    expect(codes(x, { adapterFiles: {} })).toEqual(["ADAPTER_MISMATCH"]);
+    expect(codes(x, { adapterFiles: { "adapter.mjs": "export const adapter = 2;\n", "fulfillment.json": readFileSync(join(dir, "fulfillment.json"), "utf8") } })).toEqual(["ADAPTER_MISMATCH"]);
+    expect(codes(x, { adapterFiles: {} })).toEqual(["ADAPTER_MISMATCH", "ADAPTER_MISMATCH"]);
     const renamed = clone(x);
     renamed.adapter!.version = "2.0.0";
     expect(codes(reseal(renamed))).toEqual(["ADAPTER_DIGEST"]);

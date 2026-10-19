@@ -6,7 +6,12 @@ import { fileURLToPath } from "node:url";
 import { assessmentDigest, evidenceId, type ApplicationAssessment, type Evidence } from "../src/index.js";
 
 export const MEMOS_FIXTURE = fileURLToPath(new URL("./fixtures/memos", import.meta.url));
-export const MEMOS_COMMIT = "c0eeec7a260ee58e2ed1514a61bfff1fa013f42e";
+/**
+ * The Memos revision the full-repository test and CI pin: rkendel1/memos e0ce856 (branch appport/bridge-manifest-attributes),
+ * which is c0eeec7 plus a change to appport-bridge/ only. The vendored fixture is a subset of c0eeec7, whose Go and proto
+ * files are identical at e0ce856.
+ */
+export const MEMOS_COMMIT = "e0ce8569589b2eccafd13e262ea3e320251858f2";
 
 export const tempDir = (prefix = "assessment-") => mkdtempSync(join(tmpdir(), prefix));
 

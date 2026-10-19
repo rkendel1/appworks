@@ -1,0 +1,19 @@
+{
+  "extensions": [
+    "appport.fulfillment/1"
+  ],
+  "attributes": {
+    "appport.fulfillment/1": {
+      "capabilities": {
+        "memos.reactions.list@1": [
+          {
+            "contract": "org.appworks.contracts.memos",
+            "capability": "memos.reactions.list",
+            "version": 1,
+            "digest": "sha256:8d67db5ca4f580fafd2fb32da567238bc64c41d55b9c13b36d5aab038cf82026"
+          }
+        ]
+      }
+    }
+  }
+}

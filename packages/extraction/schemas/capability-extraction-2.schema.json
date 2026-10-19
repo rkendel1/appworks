@@ -1,0 +1,1118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://appport.dev/schemas/appport/1/capability-extraction-2.schema.json",
+  "title": "AppWorks capability extraction",
+  "description": "appport.capability-extraction/2: one assessed operation of an existing application, its proposed AppPort contract, the adapter that exposes it through the application's existing boundary, the fulfillment declaration that boundary publishes, the runtime it was verified on, and the verification of named behaviors. A provenance record: not executable, not an authorization grant, not proof of equivalence. See spec/extraction-1.md \u00a79.",
+  "type": "object",
+  "properties": {
+    "format": {
+      "const": "appport.capability-extraction/2"
+    },
+    "extraction": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "verificationRun": {
+          "type": "object",
+          "properties": {
+            "startedAt": {
+              "type": "string"
+            },
+            "finishedAt": {
+              "type": "string"
+            },
+            "runner": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "startedAt",
+            "finishedAt",
+            "runner"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "id",
+        "createdAt"
+      ],
+      "additionalProperties": false
+    },
+    "tool": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "additionalProperties": false
+    },
+    "identity": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]*(\\.[a-z][a-z0-9]*)+$"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "previous": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "name",
+        "revision"
+      ],
+      "additionalProperties": false
+    },
+    "stage": {
+      "enum": [
+        "proposed",
+        "implemented"
+      ]
+    },
+    "assessment": {
+      "type": "object",
+      "properties": {
+        "format": {
+          "const": "appport.application-assessment/1"
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "tool": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "version": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "version"
+          ],
+          "additionalProperties": false
+        },
+        "scanner": {
+          "type": "string"
+        },
+        "candidate": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^cand-"
+            },
+            "digest": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            }
+          },
+          "required": [
+            "id",
+            "digest"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "format",
+        "digest",
+        "tool",
+        "scanner",
+        "candidate"
+      ],
+      "additionalProperties": false
+    },
+    "source": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "repository": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40,64}$"
+        },
+        "operation": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "rpc"
+            },
+            "service": {
+              "type": "string"
+            },
+            "method": {
+              "type": "string"
+            },
+            "fullMethod": {
+              "type": "string"
+            },
+            "http": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "service",
+            "method",
+            "fullMethod"
+          ],
+          "additionalProperties": false
+        },
+        "entryPoints": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string"
+              },
+              "subject": {
+                "type": "string"
+              },
+              "evidence": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^ev-[0-9a-f]{16}$"
+                }
+              }
+            },
+            "required": [
+              "kind",
+              "subject",
+              "evidence"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "implementation": {
+          "type": "object",
+          "properties": {
+            "symbol": {
+              "type": "string"
+            },
+            "location": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "startLine": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "endLine": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              },
+              "required": [
+                "path",
+                "startLine",
+                "endLine"
+              ],
+              "additionalProperties": false
+            },
+            "evidence": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^ev-[0-9a-f]{16}$"
+              }
+            }
+          },
+          "required": [
+            "symbol",
+            "location",
+            "evidence"
+          ],
+          "additionalProperties": false
+        },
+        "tests": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "symbol": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              },
+              "evidence": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^ev-[0-9a-f]{16}$"
+                }
+              }
+            },
+            "required": [
+              "symbol",
+              "path",
+              "evidence"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "name",
+        "revision",
+        "operation",
+        "entryPoints",
+        "implementation",
+        "tests"
+      ],
+      "additionalProperties": false
+    },
+    "contract": {
+      "type": "object",
+      "properties": {
+        "canonical": {
+          "type": "object",
+          "required": [
+            "protocol",
+            "application",
+            "capabilities"
+          ]
+        },
+        "capability": {
+          "type": "object",
+          "properties": {
+            "contract": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "version": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "required": [
+            "contract",
+            "name",
+            "version"
+          ],
+          "additionalProperties": false
+        },
+        "contractDigest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "capabilityDigest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "proposal": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "inputSchema": {
+              "type": "object"
+            },
+            "outputSchema": {
+              "type": "object"
+            }
+          },
+          "required": [
+            "name",
+            "inputSchema",
+            "outputSchema"
+          ],
+          "additionalProperties": false
+        },
+        "mapping": {
+          "type": "object",
+          "properties": {
+            "changes": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "direction": {
+                    "enum": [
+                      "input",
+                      "output"
+                    ]
+                  },
+                  "kind": {
+                    "type": "string"
+                  },
+                  "target": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "direction",
+                  "kind",
+                  "target",
+                  "reason"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "decisions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "subject": {
+                    "type": "string"
+                  },
+                  "decision": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "subject",
+                  "decision",
+                  "reason"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "fields": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "direction": {
+                    "enum": [
+                      "input",
+                      "output"
+                    ]
+                  },
+                  "contract": {
+                    "type": "string"
+                  },
+                  "source": {
+                    "type": "string"
+                  },
+                  "rule": {
+                    "enum": [
+                      "identity",
+                      "default-if-absent"
+                    ]
+                  }
+                },
+                "required": [
+                  "direction",
+                  "contract",
+                  "source",
+                  "rule"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "changes",
+            "decisions",
+            "fields"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "canonical",
+        "capability",
+        "contractDigest",
+        "capabilityDigest",
+        "proposal",
+        "mapping"
+      ],
+      "additionalProperties": false
+    },
+    "adapter": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1
+            },
+            "files": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "digest": {
+                    "type": "string",
+                    "pattern": "^sha256:[0-9a-f]{64}$"
+                  }
+                },
+                "required": [
+                  "path",
+                  "digest"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 1
+            },
+            "packages": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "boundary": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "files": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "digest": {
+                        "type": "string",
+                        "pattern": "^sha256:[0-9a-f]{64}$"
+                      }
+                    },
+                    "required": [
+                      "path",
+                      "digest"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "invocation": {
+                  "type": "object",
+                  "properties": {
+                    "method": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "method",
+                    "path"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "name",
+                "description",
+                "files",
+                "invocation"
+              ],
+              "additionalProperties": false
+            },
+            "digest": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            }
+          },
+          "required": [
+            "name",
+            "version",
+            "files",
+            "packages",
+            "boundary",
+            "digest"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "fulfillment": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "object",
+              "properties": {
+                "application": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "capability": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "version": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              },
+              "required": [
+                "application",
+                "capability",
+                "version"
+              ],
+              "additionalProperties": false
+            },
+            "extensions": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "attributes": {
+              "type": "object"
+            },
+            "digest": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            }
+          },
+          "required": [
+            "provider",
+            "extensions",
+            "attributes",
+            "digest"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "runtime": {
+      "type": "object",
+      "properties": {
+        "packages": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "application": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "node": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "packages",
+        "application",
+        "node"
+      ],
+      "additionalProperties": false
+    },
+    "dependencies": {
+      "type": "object",
+      "properties": {
+        "packages": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "application": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "environment": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "packages",
+        "application",
+        "environment"
+      ],
+      "additionalProperties": false
+    },
+    "authorization": {
+      "type": "object",
+      "properties": {
+        "requirements": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "restrictions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^ev-[0-9a-f]{16}$"
+          }
+        }
+      },
+      "required": [
+        "requirements",
+        "restrictions",
+        "evidence"
+      ],
+      "additionalProperties": false
+    },
+    "sideEffects": {
+      "type": "object",
+      "properties": {
+        "effect": {
+          "const": "observation"
+        },
+        "persistence": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "operation": {
+                "const": "read"
+              },
+              "statement": {
+                "type": "string"
+              },
+              "evidence": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^ev-[0-9a-f]{16}$"
+                }
+              }
+            },
+            "required": [
+              "operation",
+              "statement",
+              "evidence"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^ev-[0-9a-f]{16}$"
+          }
+        }
+      },
+      "required": [
+        "effect",
+        "persistence",
+        "evidence"
+      ],
+      "additionalProperties": false
+    },
+    "verification": {
+      "type": "object",
+      "properties": {
+        "required": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "authorization.claim-not-authority",
+              "authorization.discovery-not-authority",
+              "authorization.no-bypass",
+              "authorization.permitted-results",
+              "authorization.resource-restriction",
+              "authorization.unauthenticated-denied",
+              "contract.empty-and-multiple",
+              "contract.interface-conformance",
+              "contract.invalid-input",
+              "contract.no-field-omitted",
+              "contract.no-sensitive-data",
+              "contract.optional-fields",
+              "contract.output-shape",
+              "errors.deliberate-mapping",
+              "errors.denial-distinguishable",
+              "errors.failure-not-success",
+              "integration.declaration-fails-closed",
+              "integration.discoverable",
+              "integration.fulfillment-claim",
+              "integration.real-operation",
+              "integration.source-revision"
+            ]
+          }
+        },
+        "records": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "behavior": {
+                "enum": [
+                  "authorization.claim-not-authority",
+                  "authorization.discovery-not-authority",
+                  "authorization.no-bypass",
+                  "authorization.permitted-results",
+                  "authorization.resource-restriction",
+                  "authorization.unauthenticated-denied",
+                  "contract.empty-and-multiple",
+                  "contract.interface-conformance",
+                  "contract.invalid-input",
+                  "contract.no-field-omitted",
+                  "contract.no-sensitive-data",
+                  "contract.optional-fields",
+                  "contract.output-shape",
+                  "errors.deliberate-mapping",
+                  "errors.denial-distinguishable",
+                  "errors.failure-not-success",
+                  "integration.declaration-fails-closed",
+                  "integration.discoverable",
+                  "integration.fulfillment-claim",
+                  "integration.real-operation",
+                  "integration.source-revision"
+                ]
+              },
+              "category": {
+                "enum": [
+                  "contract",
+                  "authorization",
+                  "error",
+                  "integration"
+                ]
+              },
+              "description": {
+                "type": "string",
+                "minLength": 1
+              },
+              "status": {
+                "enum": [
+                  "not-run",
+                  "passed",
+                  "failed",
+                  "inconclusive"
+                ]
+              },
+              "procedure": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "enum": [
+                      "integration-test",
+                      "unit-test",
+                      "static-check",
+                      "protocol-check"
+                    ]
+                  },
+                  "reference": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "kind",
+                  "reference"
+                ],
+                "additionalProperties": false
+              },
+              "subject": {
+                "type": "object",
+                "properties": {
+                  "sourceRevision": {
+                    "type": "string"
+                  },
+                  "capabilityDigest": {
+                    "type": "string",
+                    "pattern": "^sha256:[0-9a-f]{64}$"
+                  },
+                  "adapterDigest": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^sha256:[0-9a-f]{64}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "declarationDigest": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^sha256:[0-9a-f]{64}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "runtimeDigest": {
+                    "type": "string",
+                    "pattern": "^sha256:[0-9a-f]{64}$"
+                  }
+                },
+                "required": [
+                  "sourceRevision",
+                  "capabilityDigest",
+                  "adapterDigest",
+                  "declarationDigest",
+                  "runtimeDigest"
+                ],
+                "additionalProperties": false
+              },
+              "results": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "limitations": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "against": {
+                "enum": [
+                  "real-application",
+                  "stub-application",
+                  "none"
+                ]
+              }
+            },
+            "required": [
+              "behavior",
+              "category",
+              "description",
+              "status",
+              "subject",
+              "results",
+              "limitations",
+              "against"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "summary": {
+          "type": "object",
+          "properties": {
+            "not-run": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "passed": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "failed": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "inconclusive": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "not-run",
+            "passed",
+            "failed",
+            "inconclusive"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "required",
+        "records",
+        "summary"
+      ],
+      "additionalProperties": false
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "class",
+          "kind",
+          "observation",
+          "method"
+        ]
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "pattern": "^[A-Z_]+$"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "description"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "questions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "question": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "question"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "scope": {
+      "type": "object",
+      "properties": {
+        "grantsAuthority": {
+          "const": false
+        },
+        "executable": {
+          "const": false
+        },
+        "establishesEquivalence": {
+          "const": false
+        },
+        "modifiesTarget": {
+          "const": false
+        },
+        "deploys": {
+          "const": false
+        }
+      },
+      "required": [
+        "grantsAuthority",
+        "executable",
+        "establishesEquivalence",
+        "modifiesTarget",
+        "deploys"
+      ],
+      "additionalProperties": false
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    }
+  },
+  "required": [
+    "format",
+    "extraction",
+    "tool",
+    "identity",
+    "stage",
+    "assessment",
+    "source",
+    "contract",
+    "adapter",
+    "fulfillment",
+    "runtime",
+    "dependencies",
+    "authorization",
+    "sideEffects",
+    "verification",
+    "evidence",
+    "findings",
+    "limitations",
+    "questions",
+    "scope",
+    "digest"
+  ],
+  "additionalProperties": false
+}

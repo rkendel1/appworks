@@ -1,7 +1,11 @@
 {
-  "format": "appport.capability-extraction-plan/1",
+  "format": "appport.capability-extraction-plan/2",
   "candidate": "cand-memos.api.MemoService.ListMemoReactions",
-  "identity": { "name": "memos.reactions.list", "revision": 1 },
+  "identity": {
+    "name": "memos.reactions.list",
+    "revision": 2,
+    "previous": "sha256:81011ddc62b9f3dddf1b8ac54b5d499be2c58bbb8aae0bd65968afd58f550e41"
+  },
   "contract": "contract.json",
   "mapping": {
     "changes": [
@@ -59,27 +63,89 @@
       }
     ],
     "fields": [
-      { "direction": "input", "contract": "/parent", "source": "ListMemoReactionsRequest.parent (path parameter)", "rule": "identity" },
-      { "direction": "input", "contract": "/pageSize", "source": "ListMemoReactionsRequest.page_size (query parameter pageSize)", "rule": "identity" },
-      { "direction": "input", "contract": "/pageToken", "source": "ListMemoReactionsRequest.page_token (query parameter pageToken)", "rule": "identity" },
-      { "direction": "output", "contract": "/reactions", "source": "ListMemoReactionsResponse.reactions", "rule": "default-if-absent" },
-      { "direction": "output", "contract": "/reactions/*/name", "source": "Reaction.name", "rule": "identity" },
-      { "direction": "output", "contract": "/reactions/*/creator", "source": "Reaction.creator", "rule": "identity" },
-      { "direction": "output", "contract": "/reactions/*/reactionType", "source": "Reaction.reaction_type", "rule": "identity" },
-      { "direction": "output", "contract": "/reactions/*/createTime", "source": "Reaction.create_time (RFC 3339)", "rule": "identity" },
-      { "direction": "output", "contract": "/nextPageToken", "source": "ListMemoReactionsResponse.next_page_token", "rule": "default-if-absent" }
+      {
+        "direction": "input",
+        "contract": "/parent",
+        "source": "ListMemoReactionsRequest.parent (path parameter)",
+        "rule": "identity"
+      },
+      {
+        "direction": "input",
+        "contract": "/pageSize",
+        "source": "ListMemoReactionsRequest.page_size (query parameter pageSize)",
+        "rule": "identity"
+      },
+      {
+        "direction": "input",
+        "contract": "/pageToken",
+        "source": "ListMemoReactionsRequest.page_token (query parameter pageToken)",
+        "rule": "identity"
+      },
+      {
+        "direction": "output",
+        "contract": "/reactions",
+        "source": "ListMemoReactionsResponse.reactions",
+        "rule": "default-if-absent"
+      },
+      {
+        "direction": "output",
+        "contract": "/reactions/*/name",
+        "source": "Reaction.name",
+        "rule": "identity"
+      },
+      {
+        "direction": "output",
+        "contract": "/reactions/*/creator",
+        "source": "Reaction.creator",
+        "rule": "identity"
+      },
+      {
+        "direction": "output",
+        "contract": "/reactions/*/reactionType",
+        "source": "Reaction.reaction_type",
+        "rule": "identity"
+      },
+      {
+        "direction": "output",
+        "contract": "/reactions/*/createTime",
+        "source": "Reaction.create_time (RFC 3339)",
+        "rule": "identity"
+      },
+      {
+        "direction": "output",
+        "contract": "/nextPageToken",
+        "source": "ListMemoReactionsResponse.next_page_token",
+        "rule": "default-if-absent"
+      }
     ]
   },
   "adapter": {
     "name": "memos-reactions-adapter",
-    "version": "1.0.0",
-    "files": ["runtime/adapter.mjs", "runtime/host.mjs", "runtime/register.mjs", "runtime/resolve-hooks.mjs"],
-    "packages": { "@appport/sdk": "1.2.2" },
+    "version": "1.1.0",
+    "files": [
+      "runtime/adapter.mjs",
+      "runtime/declaration.mjs",
+      "runtime/fulfillment.json",
+      "runtime/host.mjs",
+      "runtime/register.mjs",
+      "runtime/resolve-hooks.mjs"
+    ],
+    "packages": {
+      "@appport/protocol": "1.2.0",
+      "@appport/sdk": "1.2.2"
+    },
     "boundary": {
       "name": "memos-appport-bridge",
-      "description": "The Memos AppPort bridge (appport-bridge/) at the source revision, loaded unmodified: one AppPort server in trusted-boundary mode; authentication records the caller's Memos credential; permissionAuthorizer; capabilities call Memos' own HTTP API with that credential.",
-      "files": ["appport-bridge/bridge.mjs", "appport-bridge/lib/bridge-kit.mjs", "appport-bridge/package-lock.json"],
-      "invocation": { "method": "GET", "path": "/api/{parent}/reactions" }
+      "description": "The Memos AppPort bridge (appport-bridge/) at the source revision, loaded unmodified: one AppPort server in trusted-boundary mode; authentication records the caller's Memos credential; permissionAuthorizer; capabilities call Memos' own HTTP API with that credential; startBridge publishes the host's manifest extensions and attributes (from rkendel1/memos e0ce856).",
+      "files": [
+        "appport-bridge/bridge.mjs",
+        "appport-bridge/lib/bridge-kit.mjs",
+        "appport-bridge/package-lock.json"
+      ],
+      "invocation": {
+        "method": "GET",
+        "path": "/api/{parent}/reactions"
+      }
     }
   },
   "authorization": {
@@ -96,19 +162,64 @@
   },
   "environment": [
     "A Memos server built from the source revision, reachable from the bridge at APPPORT_BRIDGE_UPSTREAM.",
-    "The Memos bridge at the source revision (MEMOS_REPO), hosted with runtime/register.mjs and runtime/host.mjs on Node 22.13 or later.",
-    "@appport/sdk 1.2.2, the version the bridge's package-lock.json pins, with its exact @appport/* dependencies.",
+    "The Memos bridge at the source revision (MEMOS_REPO), whose startBridge publishes manifest extensions and attributes (rkendel1/memos e0ce856 and later), hosted with runtime/register.mjs and runtime/host.mjs on Node 22.13 or later.",
+    "@appport/sdk 1.2.2, the version the bridge's package-lock.json pins, with its exact @appport/* dependencies; @appport/protocol 1.2.0 for the fulfillment declaration (claimFor, fulfillmentAttributes) and its checks.",
     "Callers present their own Memos personal access token as `authorization: Bearer <token>`; put TLS in front of the bridge beyond localhost."
   ],
   "limitations": [
-    { "code": "fulfillment-claim-unpublished", "description": "The bridge kit at the source revision passes no manifest attributes to AppPort, so the boundary cannot publish a fulfillment claim for the proposed contract; AppPort's evaluateFulfillment therefore reports claim.undeclared. Publishing the claim needs a one-line change to the bridge at a new Memos revision, which this extraction does not make." },
-    { "code": "pagination-ignored", "description": "Memos ignores page_size and page_token for this operation and returns every reaction; the capability passes both through unchanged and inherits that behavior." },
-    { "code": "states-exercised", "description": "Verified on a fresh SQLite instance with synthetic users (an administrator and two regular users), PRIVATE, PROTECTED and PUBLIC memos, zero, one and several reactions. MySQL and PostgreSQL drivers, archived memos, Spaces and instance settings that allow anonymous access were not exercised." },
-    { "code": "host-composition", "description": "The host re-states the bridge's build() descriptor to add one capability, because the bridge offers no extension point; the host test checks the composed manifest against the unmodified bridge's." }
+    {
+      "code": "canonical-discovery-registry",
+      "description": "AppPort's in-process canonical discovery (@appport/core ApplicationDependencyResolver.discoverCanonical) reads an ApplicationRegistry that only accepts an in-process application's verify() result; registering the remote bridge's manifest there would fabricate that state. Discovery of the claim is verified through AppPort client discovery (appport.manifest) with @appport/protocol claimsFor and evaluateFulfillment, the checks discoverCanonical applies to each candidate."
+    },
+    {
+      "code": "host-composition",
+      "description": "The host re-states the bridge's build() descriptor to add one capability, because the bridge offers no extension point; the host test checks the composed manifest against the unmodified bridge's."
+    },
+    {
+      "code": "pagination-ignored",
+      "description": "Memos ignores page_size and page_token for this operation and returns every reaction; the capability passes both through unchanged and inherits that behavior."
+    },
+    {
+      "code": "source-revision-changed",
+      "description": "Revision 1 (c0eeec7a260ee58e2ed1514a61bfff1fa013f42e) could not publish the claim: the bridge kit's startBridge passed no manifest attributes to createApplication. Revision 2 is at e0ce8569589b2eccafd13e262ea3e320251858f2 (branch appport/bridge-manifest-attributes of rkendel1/memos), which adds only that pass-through and a kit test to appport-bridge/; Memos' Go code and protos are unchanged. Revision 1 and its failed result are kept in revisions/1/."
+    },
+    {
+      "code": "states-exercised",
+      "description": "Verified on a fresh SQLite instance with synthetic users (an administrator and two regular users), PRIVATE, PROTECTED and PUBLIC memos, zero, one and several reactions. MySQL and PostgreSQL drivers, archived memos, Spaces and instance settings that allow anonymous access were not exercised."
+    }
   ],
   "questions": [
-    { "id": "q-adopt-contract", "question": "Who adopts org.appworks.contracts.memos as a canonical contract, and under which contract id?" },
-    { "id": "q-anonymous", "question": "Should anonymous callers be able to list reactions on PUBLIC memos through AppPort when the instance allows public access, as Memos' PublicMethods does?" },
-    { "id": "q-publish-claim", "question": "Should the Memos bridge pass manifest attributes so it can publish fulfillment claims (a change at a new Memos revision)?" }
-  ]
+    {
+      "id": "q-adopt-contract",
+      "question": "Who adopts org.appworks.contracts.memos as a canonical contract, and under which contract id?"
+    },
+    {
+      "id": "q-anonymous",
+      "question": "Should anonymous callers be able to list reactions on PUBLIC memos through AppPort when the instance allows public access, as Memos' PublicMethods does?"
+    },
+    {
+      "id": "q-merge-bridge",
+      "question": "Should rkendel1/memos merge appport/bridge-manifest-attributes (e0ce856) into main, so later extractions can pin a main revision?"
+    }
+  ],
+  "fulfillment": {
+    "provider": {
+      "application": "com.usememos.memos",
+      "capability": "memos.reactions.list",
+      "version": 1
+    },
+    "declaration": "runtime/fulfillment.json"
+  },
+  "runtime": {
+    "packages": {
+      "@appport/protocol": "1.2.0",
+      "@appport/sdk": "1.2.2"
+    },
+    "application": {
+      "build": "go build -buildvcs=false -ldflags '-X github.com/usememos/memos/internal/version.Version=26.10.19-dev.e0ce856 -X github.com/usememos/memos/internal/version.Commit=e0ce8569589b2eccafd13e262ea3e320251858f2' ./cmd/memos, outside the checkout",
+      "storage": "sqlite, a fresh temporary data directory",
+      "data": "synthetic users (admin0, bob, carol) and memos created through Memos' own API by the bridge's test harness"
+    },
+    "node": ">=22.13"
+  }
 }

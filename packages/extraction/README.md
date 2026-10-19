@@ -1,14 +1,18 @@
 # @appport/extraction
 
-AppWorks capability extraction. It takes one candidate from a verified `appport.application-assessment/1` artifact and binds four
-things into a versioned, content-addressed `appport.capability-extraction/1` artifact:
+AppWorks capability extraction. It takes one candidate from a verified `appport.application-assessment/1` artifact and binds, into a
+versioned, content-addressed `appport.capability-extraction/2` artifact:
 - the existing operation, at an immutable source revision;
 - a proposed AppPort canonical contract;
 - the adapter that exposes the operation through the application's existing AppPort boundary;
-- verification records for named behaviors, each tied to the source, contract and adapter it tested.
+- the AppPort fulfillment claim that boundary publishes (`appport.fulfillment/1`, checked against the contract with `claimFor`);
+- the runtime the verification ran on;
+- verification records for named behaviors, each tied to the source, contract, adapter, declaration and runtime it tested, and saying
+  whether it ran against the real application or a stub.
 
-Specification: `spec/extraction-1.md` in [rkendel1/appworks](https://github.com/rkendel1/appworks). The JSON Schema ships in
-`schemas/`. This package also provides the `appworks` command:
+It reads `/1` artifacts with the `/1` rules. Specification: `spec/extraction-1.md` in
+[rkendel1/appworks](https://github.com/rkendel1/appworks). The JSON Schemas ship in `schemas/` (`capability-extraction-2.schema.json`,
+`capability-extraction-1.schema.json`). This package also provides the `appworks` command:
 
 ```sh
 appworks assess <repo> --output assessment.json
@@ -25,7 +29,8 @@ output that would overwrite or land inside the repository, and 4 when the extrac
 | `createExtraction` | the eligibility, contract, mapping, adapter, verification and revision rules; throws `ExtractionRefused` with every reason |
 | `verifyExtraction`, `verifyExtractionAt` | integrity and honesty of an artifact, optionally against its assessment, repository and adapter sources |
 | `compareExtractions` | revision rules; contract differences are AppPort's `compareManifests` |
-| `candidateRefusals`, `assessmentRefusals`, `contractProblems`, `schemaProblems`, `contractChanges` | the individual checks |
+| `candidateRefusals`, `assessmentRefusals`, `contractProblems`, `schemaProblems`, `contractChanges`, `fulfillmentProblems` | the individual checks |
+| `report` | the report `extract` and `verify-extraction` print: passed (real, stub-only, static), failed, inconclusive and not-run behaviors separately, never an overall success while one has not passed |
 | `BEHAVIORS`, `REQUIRED_BEHAVIORS`, `VERIFICATION_STATUSES` | what a read-only extraction verifies, and how results are stated |
 
 It reads JSON and files and executes nothing: it never runs, imports or loads an adapter, and it uses no network or language model.

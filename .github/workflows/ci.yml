@@ -26,7 +26,8 @@ jobs:
       - run: pnpm release:check
 
   # The assessment of a whole real application, and the extraction of one of its operations verified against it:
-  # Memos at the commit the AppPort integration used. Memos is built and run from a read-only checkout.
+  # Memos (public fork) at the pinned revision: c0eeec7 plus the bridge's manifest attribute pass-through. Memos is built
+  # outside the read-only checkout and run with synthetic data only; no credentials or secrets are used.
   memos:
     runs-on: ubuntu-latest
     steps:
@@ -34,7 +35,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: rkendel1/memos
-          ref: c0eeec7a260ee58e2ed1514a61bfff1fa013f42e
+          ref: e0ce8569589b2eccafd13e262ea3e320251858f2
           path: _memos
           persist-credentials: false
       - uses: actions/setup-go@v5
@@ -51,8 +52,9 @@ jobs:
       - run: pnpm vitest run packages/assessment/test/memos-full.test.ts
         env:
           APPWORKS_MEMOS_REPO: ${{ github.workspace }}/_memos
-      # Assess, build Memos (outside the checkout) and run the behavioral suite against the real operation, extract, verify,
-      # and require the committed extraction.json to be exactly what this run produces.
-      - run: pnpm extraction:memos --check
+      # Assess, build Memos (outside the checkout), run the behavioral suite against the real operation and the published
+      # fulfillment claim, extract, verify, require the committed revisions/2/extraction.json to be exactly what this run
+      # produces, confirm the checkout is unchanged, and require every known adapter defect (mutant) to be caught.
+      - run: pnpm extraction:memos --check --mutations
         env:
           MEMOS_REPO: ${{ github.workspace }}/_memos

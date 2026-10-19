@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { assessRepository, type ApplicationAssessment } from "@appport/assessment";
 import { syntheticApp, tempDir, writeTree } from "../../assessment/test/helpers.js";
+import { claimFor, fulfillmentAttributes, type AppPortManifest } from "@appport/protocol";
 import { createExtraction, proposedContract, readPlan, type ExtractionPlan, type VerificationResults } from "../src/index.js";
 
 export const REVISION = "a".repeat(40);
@@ -19,28 +20,43 @@ export function repository(revision = REVISION): string {
 export const assess = (root: string): ApplicationAssessment => assessRepository(root, { now: () => new Date("2026-01-01T00:00:00Z"), id: () => "fixed" });
 
 /** A plan directory: the proposal as contract (renamed note.get), one adapter file, the boundary file in the repo. */
-export function planDirectory(assessment: ApplicationAssessment, edit: (p: ExtractionPlan, contract: Record<string, any>) => void = () => {}): string {
+/** The declaration a host would publish: one claim of note.get@1 on the contract's note.get@1. */
+export const declarationFor = (contract: unknown) => fulfillmentAttributes({ capabilities: { "note.get@1": [claimFor(contract as AppPortManifest, "note.get", 1)] } });
+
+export function planDirectory(assessment: ApplicationAssessment, edit: (p: ExtractionPlan, contract: Record<string, any>) => void = () => {}, declaration?: (contract: unknown) => unknown): string {
   const dir = tempDir("extraction-plan-");
   const candidate = assessment.candidates.find((c) => c.id === CANDIDATE)!;
   const contract = proposedContract(assessment, candidate) as unknown as Record<string, any>;
   contract.capabilities[0].authorization = ["notes.read"];
   contract.capabilities[0].definitions[0].authorization = ["notes.read"];
   const plan: ExtractionPlan = {
-    format: "appport.capability-extraction-plan/1",
+    format: "appport.capability-extraction-plan/2",
     candidate: CANDIDATE,
     identity: { name: "note.get", revision: 1 },
     contract: "contract.json",
     mapping: { changes: [], decisions: [{ subject: "permissions", decision: "notes.read", reason: "the service's own read permission" }], fields: [{ direction: "input", contract: "/name", source: "GetNoteRequest.name", rule: "identity" }] },
-    adapter: { name: "notes-adapter", version: "1.0.0", files: ["adapter.mjs"], packages: { "@appport/sdk": "1.2.2" }, boundary: { name: "notes-bridge", description: "the service's bridge", files: ["bridge/kit.mjs"], invocation: { method: "GET", path: "/v1/{name}" } } },
+    adapter: { name: "notes-adapter", version: "1.0.0", files: ["adapter.mjs", "fulfillment.json"], packages: { "@appport/sdk": "1.2.2" }, boundary: { name: "notes-bridge", description: "the service's bridge", files: ["bridge/kit.mjs"], invocation: { method: "GET", path: "/v1/{name}" } } },
     authorization: { requirements: ["notes.read"], restrictions: ["none known"] },
     environment: ["a notes server"],
     limitations: [{ code: "synthetic", description: "test fixture" }],
-    questions: [{ id: "q-x", question: "?" }]
+    questions: [{ id: "q-x", question: "?" }],
+    fulfillment: { provider: { application: "com.example.notes", capability: "note.get", version: 1 }, declaration: "fulfillment.json" },
+    runtime: { packages: { "@appport/sdk": "1.2.2" }, application: { build: "go build", storage: "sqlite" }, node: ">=22.13" }
   };
+  const original = JSON.parse(JSON.stringify(contract));
   edit(plan, contract);
   writeFileSync(join(dir, "contract.json"), JSON.stringify(contract, null, 2));
   writeFileSync(join(dir, "extraction-plan.json"), JSON.stringify(plan, null, 2));
   writeFileSync(join(dir, "adapter.mjs"), "export const adapter = 1;\n");
+  // The declaration is made for the edited contract when it can be; for a contract no claim can be made for, the
+  // declaration of the unedited one is kept, so that the edit is what the tests see.
+  let declared: unknown;
+  try {
+    declared = (declaration ?? declarationFor)(contract);
+  } catch {
+    declared = declarationFor(original);
+  }
+  writeFileSync(join(dir, "fulfillment.json"), JSON.stringify(declared, null, 2));
   return dir;
 }
 
@@ -52,10 +68,10 @@ export function extraction(options: { status?: "passed" | "failed" } = {}) {
   const plan = readPlan(join(dir, "extraction-plan.json"), root);
   const draft = createExtraction({ assessment, candidate: CANDIDATE, checkout: { revision: REVISION }, plan, now: () => new Date(0), id: () => "x" });
   const results = (status: "passed" | "failed"): VerificationResults => ({
-    format: "appport.capability-verification-results/1",
+    format: "appport.capability-verification-results/2",
     subject: draft.verification.records[0]!.subject,
     run: { startedAt: "t0", finishedAt: "t1", runner: "test" },
-    behaviors: Object.fromEntries(draft.verification.required.map((b) => [b, { status, procedure: { kind: "integration-test" as const, reference: "test.mjs" }, results: [`${status}: ${b}`] }]))
+    behaviors: Object.fromEntries(draft.verification.required.map((b) => [b, { status, against: "real-application" as const, procedure: { kind: "integration-test" as const, reference: "test.mjs" }, results: [`${status}: ${b}`] }]))
   });
   const verified = options.status ? createExtraction({ assessment, candidate: CANDIDATE, checkout: { revision: REVISION }, plan, verification: results(options.status), now: () => new Date(0), id: () => "x" }) : draft;
   return { root, assessment, dir, plan, extraction: verified, results };

@@ -9,13 +9,18 @@ import {
   BEHAVIORS,
   EXTRACTION_FORMAT,
   EXTRACTION_PLAN_FORMAT,
+  EXTRACTION_PLAN_FORMAT_V1,
   REQUIRED_BEHAVIORS,
+  VERIFICATION_TARGETS,
   TOOL_NAME,
   TOOL_VERSION,
   VERIFICATION_RESULTS_FORMAT,
   VERIFICATION_STATUSES,
   adapterDigest,
   contractChanges,
+  declarationDigest,
+  fulfillmentProblems,
+  runtimeDigest,
   contractProblems,
   extractionDigest,
   fileDigest,
@@ -23,7 +28,10 @@ import {
   type AdapterIdentity,
   type BehaviorId,
   type CapabilityExtraction,
+  type FulfillmentDeclaration,
   type Mapping,
+  type RuntimeConfiguration,
+  type VerificationTarget,
   type ProcedureKind,
   type VerificationRecord,
   type VerificationStatus
@@ -83,7 +91,7 @@ export function assessmentRefusals(assessment: unknown, checkout: { revision?: s
 
 /** The extraction plan: a reviewable, hand-written input (spec/extraction-1.md §5). */
 export interface ExtractionPlan {
-  format: typeof EXTRACTION_PLAN_FORMAT;
+  format: typeof EXTRACTION_PLAN_FORMAT | typeof EXTRACTION_PLAN_FORMAT_V1;
   candidate: string;
   identity: { name: string; revision: number; previous?: string };
   contract: string;
@@ -99,6 +107,10 @@ export interface ExtractionPlan {
   environment: string[];
   limitations: Array<{ code: string; description: string }>;
   questions: Array<{ id: string; question: string }>;
+  /** Plan `/2`: the declaration file (relative to the plan, one of the adapter files) and the provider capability making the claim. */
+  fulfillment?: { provider: FulfillmentDeclaration["provider"]; declaration: string };
+  /** Plan `/2`: the runtime the verification runs on. */
+  runtime?: RuntimeConfiguration;
 }
 
 /** Verification results produced by a test run for one subject (spec/extraction-1.md §6). */
@@ -106,7 +118,7 @@ export interface VerificationResults {
   format: typeof VERIFICATION_RESULTS_FORMAT;
   subject: VerificationRecord["subject"];
   run: { startedAt: string; finishedAt: string; runner: string };
-  behaviors: Partial<Record<BehaviorId, { status: Exclude<VerificationStatus, "not-run">; procedure: { kind: ProcedureKind; reference: string }; results: string[]; limitations?: string[] } | { status: "not-run"; limitations: string[] }>>;
+  behaviors: Partial<Record<BehaviorId, { status: Exclude<VerificationStatus, "not-run">; against: VerificationTarget; procedure: { kind: ProcedureKind; reference: string }; results: string[]; limitations?: string[] } | { status: "not-run"; limitations: string[] }>>;
 }
 
 export interface ExtractInput {
@@ -115,7 +127,7 @@ export interface ExtractInput {
   /** What the caller observed of the checkout: its revision and the assessment's location check against it. */
   checkout: { revision?: string; locationsVerified?: { ok: boolean; codes: string[] } };
   /** Without a plan: a proposed extraction (the assessment's proposal as the contract, no adapter, nothing run). */
-  plan?: { plan: ExtractionPlan; contract: unknown; adapterFiles: Record<string, string>; boundaryFiles: Record<string, string> };
+  plan?: { plan: ExtractionPlan; contract: unknown; adapterFiles: Record<string, string>; boundaryFiles: Record<string, string>; declaration?: unknown };
   verification?: VerificationResults;
   /** The previous revision of this extraction, when making a new one. */
   previous?: CapabilityExtraction;
@@ -124,6 +136,7 @@ export interface ExtractInput {
 }
 
 const order = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+const sortKeys = (o: Record<string, string>) => Object.fromEntries(Object.entries(o ?? {}).sort(([x], [y]) => order(x, y)));
 const uniqueSorted = (values: Iterable<string>) => [...new Set(values)].sort(order);
 
 /** The evidence records a candidate cites, with everything they are based on, copied verbatim. */
@@ -206,8 +219,10 @@ export function createExtraction(input: ExtractInput): CapabilityExtraction {
   let version: number;
   let mapping: Mapping;
   let adapter: AdapterIdentity | null = null;
+  let fulfillment: FulfillmentDeclaration | null = null;
+  let runtime: RuntimeConfiguration = { packages: {}, application: {}, node: "" };
   if (plan) {
-    if (plan.plan.format !== EXTRACTION_PLAN_FORMAT) reasons.push({ code: "PLAN_FORMAT", message: `a plan is ${EXTRACTION_PLAN_FORMAT}` });
+    if (plan.plan.format !== EXTRACTION_PLAN_FORMAT && plan.plan.format !== EXTRACTION_PLAN_FORMAT_V1) reasons.push({ code: "PLAN_FORMAT", message: `a plan is ${EXTRACTION_PLAN_FORMAT} (or ${EXTRACTION_PLAN_FORMAT_V1}, without a declaration)` });
     if (plan.plan.candidate !== c.id) reasons.push({ code: "PLAN_CANDIDATE", message: `the plan is for ${plan.plan.candidate}, not ${c.id}` });
     name = plan.plan.identity.name;
     version = 1;
@@ -219,6 +234,19 @@ export function createExtraction(input: ExtractInput): CapabilityExtraction {
     const made = adapterIdentity(plan.plan.adapter, plan.adapterFiles, plan.boundaryFiles);
     reasons.push(...made.missing);
     adapter = made.adapter;
+    if (plan.plan.format === EXTRACTION_PLAN_FORMAT) {
+      if (!plan.plan.runtime) reasons.push({ code: "PLAN_RUNTIME", message: "a /2 plan states the runtime the verification runs on" });
+      else runtime = { packages: sortKeys(plan.plan.runtime.packages), application: sortKeys(plan.plan.runtime.application), node: plan.plan.runtime.node };
+      if (plan.plan.fulfillment) {
+        if (!plan.plan.adapter.files.includes(plan.plan.fulfillment.declaration)) reasons.push({ code: "FULFILLMENT_NOT_ADAPTER_FILE", message: `${plan.plan.fulfillment.declaration} must be one of the adapter's files, so the adapter digest covers what the host publishes` });
+        const d = plan.declaration as { extensions?: string[]; attributes?: Record<string, never> } | undefined;
+        if (d === undefined) reasons.push({ code: "FULFILLMENT_MISSING", message: `${plan.plan.fulfillment.declaration} cannot be read` });
+        else {
+          const content = { provider: plan.plan.fulfillment.provider, extensions: d?.extensions as string[], attributes: d?.attributes as Record<string, never> };
+          fulfillment = { ...content, digest: declarationDigest(content) };
+        }
+      }
+    }
   } else {
     canonical = proposedContract(a, c);
     name = proposal.name;
@@ -233,32 +261,34 @@ export function createExtraction(input: ExtractInput): CapabilityExtraction {
   for (const ch of changes) if (!explained.has(key(ch))) reasons.push({ code: "MAPPING_UNEXPLAINED", message: `${ch.direction} ${ch.target}: ${ch.kind} (${ch.severity}) is not explained in the plan's mapping` });
   const present = new Set(changes.map(key));
   for (const ch of mapping.changes) if (!present.has(key(ch))) reasons.push({ code: "MAPPING_STALE", message: `${ch.direction} ${ch.target}: ${ch.kind} is explained but is not a difference` });
+  if (fulfillment) for (const p of fulfillmentProblems(fulfillment, canonical, { name, version })) reasons.push(p);
   if (reasons.length) throw new ExtractionRefused(reasons);
   const capDigest = capabilityDigest(canonical, name, version)!;
 
   // Verification: results apply only to the subject they were produced for.
-  const subject = { sourceRevision: a.target.revision!, capabilityDigest: capDigest, adapterDigest: adapter?.digest ?? null };
+  const subject = { sourceRevision: a.target.revision!, capabilityDigest: capDigest, adapterDigest: adapter?.digest ?? null, declarationDigest: fulfillment?.digest ?? null, runtimeDigest: runtimeDigest(runtime) };
   const results = input.verification;
   if (results) {
     if (results.format !== VERIFICATION_RESULTS_FORMAT) throw new ExtractionRefused([{ code: "VERIFICATION_FORMAT", message: `results are ${VERIFICATION_RESULTS_FORMAT}` }]);
     if (digestOf(results.subject) !== digestOf(subject))
-      throw new ExtractionRefused([{ code: "VERIFICATION_SUBJECT_MISMATCH", message: "the results were produced for another source revision, contract or adapter; they are not carried forward" }]);
+      throw new ExtractionRefused([{ code: "VERIFICATION_SUBJECT_MISMATCH", message: "the results were produced for another source revision, contract, adapter, declaration or runtime; they are not carried forward" }]);
     for (const id of Object.keys(results.behaviors)) if (!(id in BEHAVIORS)) throw new ExtractionRefused([{ code: "VERIFICATION_BEHAVIOR", message: `unknown behavior ${id}` }]);
   }
   const records: VerificationRecord[] = REQUIRED_BEHAVIORS.map((behavior) => {
     const r = results?.behaviors[behavior];
     const base = { behavior, category: BEHAVIORS[behavior].category, description: BEHAVIORS[behavior].description, subject };
-    if (!r) return { ...base, status: "not-run" as const, results: [], limitations: [adapter ? "no result was recorded for this behavior" : "there is no adapter to verify yet"] };
-    if (r.status === "not-run") return { ...base, status: "not-run" as const, results: [], limitations: [...r.limitations].sort(order) };
+    if (!r) return { ...base, status: "not-run" as const, against: "none" as const, results: [], limitations: [adapter ? "no result was recorded for this behavior" : "there is no adapter to verify yet"] };
+    if (r.status === "not-run") return { ...base, status: "not-run" as const, against: "none" as const, results: [], limitations: [...r.limitations].sort(order) };
     if (!VERIFICATION_STATUSES.includes(r.status)) throw new ExtractionRefused([{ code: "VERIFICATION_STATUS", message: `${behavior}: ${String(r.status)}` }]);
-    return { ...base, status: r.status, procedure: r.procedure, results: uniqueSorted(r.results), limitations: uniqueSorted(r.limitations ?? []) };
+    if (!VERIFICATION_TARGETS.includes(r.against)) throw new ExtractionRefused([{ code: "VERIFICATION_TARGET", message: `${behavior}: a result says what it was obtained against (${VERIFICATION_TARGETS.join(", ")})` }]);
+    return { ...base, status: r.status, against: r.against, procedure: r.procedure, results: uniqueSorted(r.results), limitations: uniqueSorted(r.limitations ?? []) };
   });
   const summary = Object.fromEntries(VERIFICATION_STATUSES.map((s) => [s, records.filter((r) => r.status === s).length])) as Record<VerificationStatus, number>;
 
   // Revision rules against the previous extraction.
   const identity = plan ? { ...plan.plan.identity } : { name, revision: 1 };
   if (input.previous) {
-    const findings = compareExtractions(input.previous, { identity, contract: { canonical, capabilityDigest: capDigest, contractDigest: contractDigest(canonical), capability: { contract: canonical.application.id, name, version } }, adapter, source: { revision: subject.sourceRevision } });
+    const findings = compareExtractions(input.previous, { identity, contract: { canonical, capabilityDigest: capDigest, contractDigest: contractDigest(canonical), capability: { contract: canonical.application.id, name, version } }, adapter, source: { revision: subject.sourceRevision }, fulfillment, runtime });
     const blocking = findings.filter((f) => f.blocking);
     if (blocking.length) throw new ExtractionRefused(blocking.map(({ code, message }) => ({ code, message })));
   }
@@ -301,6 +331,8 @@ export function createExtraction(input: ExtractInput): CapabilityExtraction {
       }
     },
     adapter,
+    fulfillment,
+    runtime,
     dependencies: {
       packages: adapter?.packages ?? {},
       application: uniqueSorted(c.dependencies.externalPackages.map((p) => p.importPath)),
@@ -339,14 +371,26 @@ export interface RevisionFinding {
  * Contract differences are AppPort's `compareManifests`.
  */
 export function compareExtractions(
-  previous: Pick<CapabilityExtraction, "identity" | "contract" | "adapter" | "source" | "digest">,
-  next: { identity: CapabilityExtraction["identity"]; contract: Pick<CapabilityExtraction["contract"], "canonical" | "capabilityDigest" | "contractDigest" | "capability">; adapter: AdapterIdentity | null; source: { revision: string } }
+  previous: Pick<CapabilityExtraction, "identity" | "contract" | "adapter" | "source" | "digest" | "fulfillment" | "runtime">,
+  next: {
+    identity: CapabilityExtraction["identity"];
+    contract: Pick<CapabilityExtraction["contract"], "canonical" | "capabilityDigest" | "contractDigest" | "capability">;
+    adapter: AdapterIdentity | null;
+    source: { revision: string };
+    fulfillment?: FulfillmentDeclaration | null;
+    runtime?: RuntimeConfiguration;
+  }
 ): RevisionFinding[] {
   const out: RevisionFinding[] = [];
   if (previous.identity.name !== next.identity.name) out.push({ code: "IDENTITY_CHANGED", message: `${next.identity.name} is not a revision of ${previous.identity.name}`, blocking: true });
   const sourceChanged = previous.source.revision !== next.source.revision;
   const contractChanged = previous.contract.contractDigest !== next.contract.contractDigest;
   const adapterChanged = (previous.adapter?.digest ?? null) !== (next.adapter?.digest ?? null);
+  // A /1 predecessor had neither: any declaration or runtime is a change.
+  const declarationChanged = (previous.fulfillment?.digest ?? null) !== (next.fulfillment?.digest ?? null);
+  const runtimeChanged = (previous.runtime ? runtimeDigest(previous.runtime) : null) !== (next.runtime ? runtimeDigest(next.runtime) : null);
+  if (declarationChanged) out.push({ code: "DECLARATION_CHANGED", message: `fulfillment declaration ${previous.fulfillment?.digest ?? "none"} → ${next.fulfillment?.digest ?? "none"}`, blocking: false });
+  if (runtimeChanged) out.push({ code: "RUNTIME_CHANGED", message: "the declared runtime changed", blocking: false });
   if (sourceChanged) out.push({ code: "SOURCE_CHANGED", message: `source revision ${previous.source.revision} → ${next.source.revision}`, blocking: false });
   if (adapterChanged) out.push({ code: "ADAPTER_CHANGED", message: `adapter ${previous.adapter?.digest ?? "none"} → ${next.adapter?.digest ?? "none"}`, blocking: false });
   if (contractChanged) {
@@ -355,8 +399,8 @@ export function compareExtractions(
     if (report.breaking.some((c) => c.target.startsWith(`${next.contract.capability.name}@${next.contract.capability.version}`) || c.target.startsWith(next.contract.capability.name)) && previous.contract.capability.version === next.contract.capability.version)
       out.push({ code: "CONTRACT_BREAKING_SAME_VERSION", message: `a breaking change to ${next.contract.capability.name} needs a new capability version`, blocking: true });
   }
-  if ((sourceChanged || contractChanged || adapterChanged) && next.identity.revision <= previous.identity.revision)
-    out.push({ code: "REVISION_NOT_INCREMENTED", message: `source, contract or adapter changed, but the revision is still ${next.identity.revision}`, blocking: true });
+  if ((sourceChanged || contractChanged || adapterChanged || declarationChanged || runtimeChanged) && next.identity.revision <= previous.identity.revision)
+    out.push({ code: "REVISION_NOT_INCREMENTED", message: `source, contract, adapter, declaration or runtime changed, but the revision is still ${next.identity.revision}`, blocking: true });
   if (next.identity.revision > previous.identity.revision && next.identity.previous !== previous.digest) out.push({ code: "PREVIOUS_MISMATCH", message: "a new revision names the digest of the one it replaces", blocking: true });
   if (next.identity.revision < previous.identity.revision) out.push({ code: "REVISION_REGRESSED", message: "revisions only increase", blocking: true });
   return out;
