@@ -6,12 +6,13 @@
 |---|---|---|
 | Recipe source format | `format: "appport.recipe/1"` | A reader accepts exactly the versions it implements and refuses every other (`RECIPE_FORMAT`), and refuses undocumented members. A new major format is a new string. |
 | Lock format | `appport.recipe-lock/1` | as above (`LOCK_FORMAT`) |
+| Assessment format | `appport.application-assessment/1` | as above (`ASSESSMENT_FORMAT`). The scanner rules are versioned separately (`configuration.scanner`, `appport.assessment-scanner/1`): a change in what is recognized or how candidates are classified is a new scanner version, so the same tree may assess differently under a new tool version; the digest covers the tool version |
 | Package format | `appport.recipe-package/1`, `kind` | as above; an unknown or reserved `kind` (`compiled`) is refused, never read as executable |
 | Package content | package `digest` | any change to any member gives a new digest; a package is immutable |
 | Logical recipe | recipe `id` (reverse-domain) | stable across revisions and releases |
 | Recipe release | Distribution Protocol product release, SemVer | immutable once published; owned by Distribution Protocol |
 | Canonical capability | AppPort contract id, capability, integer major version, `contractDigest`, `capabilityDigest` | owned by AppPort; never SemVer |
-| npm packages | `@appport/recipe`, `@appport/recipe-distribution` versions | SemVer for the library API, independently of the formats they read |
+| npm packages | `@appport/recipe`, `@appport/recipe-distribution`, `@appport/assessment` versions | SemVer for the library API and the `appworks` CLI (commands, options, exit statuses), independently of the formats they read |
 | Distribution Protocol | `distribution/1` | the adapter pins the protocol version and package version it was written against |
 
 Changes that are **compatible** within a format version: adding a finding code, adding a warning, tightening a message. Changes that are
@@ -30,8 +31,8 @@ AppWorks consumes the **published** AppPort canonical-capability release, at exa
 
 | Package | Version | Used by | For |
 |---|---|---|---|
-| `@appport/protocol` | 1.2.0 | `@appport/recipe` | `Dependency` and `CanonicalDependencyTarget`, `isCanonicalDependencyTarget`, `lintIntegration`, `isCanonicalContract`, `compareSchemas`, `FulfillmentClaim`, `FulfillmentStatus`, digests, pointers, versions |
-| `@appport/schema` | 1.1.1 | `@appport/recipe` | input validation (`fromJSONSchema`); pinned to the version `@appport/integration` 1.2.0 pins, so one copy is installed |
+| `@appport/protocol` | 1.2.0 | `@appport/recipe`, `@appport/assessment` | assessment: `digestOf`, `canonicalize`, `sha256`, `isDigest`, `isValidName`, `JSON_SCHEMA_DIALECT`, `CapabilityVersionEntry`, `CapabilityEffect`, `JSONSchema`; recipe: `Dependency` and `CanonicalDependencyTarget`, `isCanonicalDependencyTarget`, `lintIntegration`, `isCanonicalContract`, `compareSchemas`, `FulfillmentClaim`, `FulfillmentStatus`, digests, pointers, versions |
+| `@appport/schema` | 1.1.1 | `@appport/recipe`; `@appport/assessment` tests only | input validation (`fromJSONSchema`); pinned to the version `@appport/integration` 1.2.0 pins, so one copy is installed |
 | `@appport/integration` | 1.2.0 | `@appport/recipe` | `lintRule`, `requiredTargetsNotProduced`, `Rule` |
 | `@appport/core` | 1.3.0 | tests only (`devDependency`) | real canonical contracts, discovery, resolution, `resolvedDependency()`, bindings, grants and invocation in `canonical-resolution.test.ts` and the release check |
 

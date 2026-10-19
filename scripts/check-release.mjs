@@ -6,7 +6,7 @@
 //
 //   node scripts/check-release.mjs [--keep <dir>]
 import { spawnSync } from "node:child_process";
-import { copyFileSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
+import { copyFileSync, cpSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -74,7 +74,7 @@ for (const name of Object.keys(manifests)) {
   }
 }
 const recipeManifest = manifests["@appport/recipe"];
-for (const [name, version] of Object.entries({ ...recipeManifest.dependencies, "@appport/core": coreVersion })) {
+for (const [name, version] of Object.entries({ ...recipeManifest.dependencies, ...manifests["@appport/assessment"].dependencies, "@appport/core": coreVersion })) {
   const installed = JSON.parse(readFileSync(join(project, "node_modules", name, "package.json"), "utf8")).version;
   if (installed !== version) {
     console.error(`${name}: installed ${installed}, the manifest declares ${version}`);
@@ -126,4 +126,35 @@ console.log("  ok  the public declarations typecheck in a consumer project");
 // 6. A recipe lock over real canonical resolution by the published @appport/core.
 copyFileSync(join(root, "scripts", "installed-consumer", "canonical.mjs"), join(project, "canonical.mjs"));
 process.stdout.write(run("node", ["canonical.mjs"], { cwd: project }).stdout);
+// 7. The installed `appworks` command assesses a real application (the vendored Memos subset, copied outside the
+//    repository), leaves it unchanged, and its artifact verifies through the installed library and its shipped schema.
+const memos = join(scratch, "memos");
+cpSync(join(root, "packages", "assessment", "test", "fixtures", "memos"), memos, { recursive: true });
+const bin = join(project, "node_modules", ".bin", "appworks");
+const listing = (dir) => readdirSync(dir, { recursive: true }).sort().map((p) => `${p}:${lstatSync(join(dir, p)).isFile() ? readFileSync(join(dir, p), "base64") : ""}`).join("\n");
+const before = listing(memos);
+const assessed = run(bin, ["assess", memos, "--output", join(project, "assessment.json")], { cwd: project });
+process.stdout.write(`${assessed.stdout.trimEnd().replace(/^/gm, "  | ")}\n`);
+if (listing(memos) !== before) {
+  console.error("the assessed repository changed");
+  process.exit(1);
+}
+run(bin, ["verify", join(project, "assessment.json"), "--repo", memos], { cwd: project });
+writeFileSync(join(project, "assessment.mjs"), `
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { fromJSONSchema } from "@appport/schema";
+import { ASSESSMENT_FORMAT, verifyAssessment } from "@appport/assessment";
+const check = (ok, message) => { if (!ok) { console.error("FAIL", message); process.exit(1); } console.log("  ok ", message); };
+const a = JSON.parse(readFileSync("assessment.json", "utf8"));
+check(a.format === ASSESSMENT_FORMAT && verifyAssessment(a, { repository: ${JSON.stringify(memos)} }).ok, "the installed CLI's artifact verifies, locations included");
+const require = createRequire(import.meta.url);
+const schema = JSON.parse(readFileSync(require.resolve("@appport/assessment/package.json").replace(/package\\.json$/, "schemas/application-assessment.schema.json"), "utf8"));
+check(fromJSONSchema(schema).validate(a).ok, "the shipped schema validates it");
+const recommended = a.candidates.find((c) => c.id === a.recommendation?.candidate);
+check(recommended?.readiness.class === "exposure-candidate" && recommended.exposure.authoritative === false && a.scope.grantsAuthority === false, "it recommends an exposure candidate as a non-authoritative proposal");
+a.candidates[0].readiness.class = "verified";
+check(!verifyAssessment(a).ok, "a claim of verification is refused");
+`);
+process.stdout.write(run("node", ["assessment.mjs"], { cwd: project }).stdout);
 console.log(`\nRelease check passed (${project})`);

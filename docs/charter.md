@@ -43,11 +43,12 @@ one designed for a new application are the same kind of thing, fulfilled, resolv
 | Publishing and acquisition (registries, fetching, receipts) | **not implemented** |
 | Recipe compiler | **not implemented** |
 | Recipe runtime, durable orchestration, human-task persistence | **not implemented** |
-| Repository assessment, capability discovery in existing code | **not implemented** |
+| Repository assessment, capability discovery in existing code (`@appport/assessment`) | implemented for Go and Protocol Buffers, draft format `appport.application-assessment/1`: static, evidence-backed candidates and one recommended exposure candidate; verifies nothing |
 | Automated extraction, replacement planning, migration | **not implemented** |
 | Visual Recipe Studio | **not implemented** |
 
-Nothing in this repository executes a recipe, extracts code, migrates an application or establishes that a business outcome occurred.
+Nothing in this repository executes a recipe, extracts code, migrates an application or establishes that a business outcome occurred. An
+assessment reads an application; it does not run it, change it, or establish that anything it describes behaves as described.
 
 ## Principles
 

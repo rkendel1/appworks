@@ -24,3 +24,24 @@ jobs:
       - run: pnpm test
       - run: pnpm boundary:check
       - run: pnpm release:check
+
+  # The assessment of a whole real application: Memos at the commit the AppPort integration used, read-only.
+  memos-assessment:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: rkendel1/memos
+          ref: c0eeec7a260ee58e2ed1514a61bfff1fa013f42e
+          path: _memos
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm vitest run packages/assessment/test/memos-full.test.ts
+        env:
+          APPWORKS_MEMOS_REPO: ${{ github.workspace }}/_memos

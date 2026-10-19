@@ -30,5 +30,5 @@ one environment. A contract change requires revalidation; a provider change requ
 source. A lock grants no authority: binding still requires a grant for the provider's capability.
 
 It executes nothing, selects no provider, grants no authority, and does not depend on Distribution Protocol or any registry. A source
-package is never executable. Not implemented: a compiler, a runtime, repository assessment, extraction and migration. Part of the AppPort
-ecosystem, not of the AppPort protocol.
+package is never executable. Not implemented: a compiler, a runtime, extraction and migration (repository assessment is
+`@appport/assessment`). Part of the AppPort ecosystem, not of the AppPort protocol.

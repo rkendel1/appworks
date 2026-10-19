@@ -1,0 +1,42 @@
+{
+  "name": "@appport/assessment",
+  "version": "0.1.0",
+  "description": "AppWorks existing-application assessment: a static, read-only, evidence-backed capability inventory of a repository as an appport.application-assessment/1 artifact. Executes nothing and grants no authority.",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rkendel1/appworks.git",
+    "directory": "packages/assessment"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "appworks": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "schemas",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "tsc -b --clean"
+  },
+  "dependencies": {
+    "@appport/protocol": "1.2.0"
+  },
+  "devDependencies": {
+    "@appport/schema": "1.1.1"
+  }
+}
