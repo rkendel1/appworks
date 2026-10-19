@@ -14,7 +14,8 @@
     "typecheck": "tsc -b tsconfig.build.json --pretty && tsc -p tsconfig.test.json",
     "test": "vitest run",
     "boundary:check": "node scripts/check-boundary.mjs",
-    "release:check": "node scripts/check-release.mjs"
+    "release:check": "node scripts/check-release.mjs",
+    "publish:packages": "node scripts/publish-packages.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
