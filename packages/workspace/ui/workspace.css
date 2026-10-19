@@ -1,0 +1,20 @@
+/* AppWorks workspace page styles, on the shared Stack tokens only. */
+body { margin: 0; background: var(--stack-color-bg-canvas); color: var(--stack-color-text-default); font-family: var(--stack-font-family-sans); }
+.stack-shell__main { max-width: 1200px; }
+.stack-shell__main section { margin-top: var(--stack-space-6); }
+.stack-shell__main h2 { margin: 0 0 var(--stack-space-3); font-size: var(--stack-text-lg-size); line-height: var(--stack-text-lg-line); }
+.stack-shell__main h3 { margin: var(--stack-space-4) 0 var(--stack-space-2); font-size: var(--stack-text-md-size); }
+.appworks-muted { margin: 0 0 var(--stack-space-3); color: var(--stack-color-text-muted); }
+.appworks-outcome__ok { margin: var(--stack-space-3) 0; padding: var(--stack-space-2) var(--stack-space-3); border: var(--stack-border-width-thin) solid var(--stack-color-status-positive-border); border-radius: var(--stack-radius-md); background: var(--stack-color-status-positive-bg); color: var(--stack-color-status-positive-fg); overflow-wrap: anywhere; }
+.appworks-stages { display: flex; flex-wrap: wrap; gap: var(--stack-space-2); margin: 0; padding: 0; list-style: none; }
+.appworks-stage { display: inline-flex; gap: var(--stack-space-1); align-items: center; padding: var(--stack-space-1) var(--stack-space-2); border: var(--stack-border-width-thin) solid var(--stack-color-border-default); border-radius: var(--stack-radius-md); background: var(--stack-color-bg-surface); font-size: var(--stack-text-sm-size); }
+.appworks-stage--done { color: var(--stack-color-status-positive-fg); border-color: var(--stack-color-status-positive-border); }
+.appworks-stage--current { font-weight: var(--stack-font-weight-semibold); border-color: var(--stack-color-text-link); }
+.appworks-stage--failed { color: var(--stack-color-status-critical-fg); border-color: var(--stack-color-status-critical-border); }
+.appworks-stage--pending { color: var(--stack-color-text-muted); }
+.appworks-actions { display: grid; gap: var(--stack-space-2); margin: var(--stack-space-3) 0; }
+.appworks-action { display: flex; flex-wrap: wrap; gap: var(--stack-space-2); align-items: baseline; }
+.appworks-plain { margin: 0; padding: 0; list-style: none; }
+.appworks-project code, .appworks-list code { overflow-wrap: anywhere; }
+.stack-meta__value--mono { overflow-wrap: anywhere; }
+.appworks-noscript { padding: var(--stack-space-6); }

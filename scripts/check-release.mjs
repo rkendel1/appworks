@@ -27,7 +27,15 @@ const problems = [];
 // 1. Pack. pnpm rewrites workspace: dependencies to the concrete version.
 const tarballs = join(scratch, "tarballs");
 mkdirSync(tarballs, { recursive: true });
-const dirs = readdirSync(join(root, "packages")).map((d) => join(root, "packages", d));
+// Private packages (the @appport/workspace application) are not published, so they are not packed or installed here;
+// their own tests run them from the repository.
+const dirs = readdirSync(join(root, "packages"))
+  .map((d) => join(root, "packages", d))
+  .filter((dir) => {
+    const manifest = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
+    if (manifest.private) console.log(`Skipping ${manifest.name}: private, not published`);
+    return !manifest.private;
+  });
 const manifests = {};
 for (const dir of dirs) {
   const manifest = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));

@@ -4,6 +4,7 @@
     { "path": "./packages/assessment" },
     { "path": "./packages/extraction" },
     { "path": "./packages/recipe" },
-    { "path": "./packages/recipe-distribution" }
+    { "path": "./packages/recipe-distribution" },
+    { "path": "./packages/workspace" }
   ]
 }

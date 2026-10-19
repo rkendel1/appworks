@@ -58,3 +58,11 @@ jobs:
       - run: pnpm extraction:memos --check --mutations
         env:
           MEMOS_REPO: ${{ github.workspace }}/_memos
+      # The same revision through the project workspace, end to end: acquisition through @appport/github (the job's
+      # read-only token, referenced by name and never recorded), discovery of the running unmodified bridge, assessment,
+      # reconciliation, approval, the extraction runner, verification, readiness; the checkouts and history unchanged.
+      - run: pnpm vitest run packages/workspace/test/memos-e2e.test.ts
+        env:
+          APPWORKS_MEMOS_E2E: "1"
+          APPWORKS_MEMOS_REPO: ${{ github.workspace }}/_memos
+          GITHUB_TOKEN: ${{ github.token }}

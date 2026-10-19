@@ -87,6 +87,11 @@ It runs, in this order, and stops at the first broken step:
 9. Confirms the checkout is unchanged (a tree hash over every file, `.git` included).
 10. Reports passed, failed, inconclusive and not-run behaviors separately, with what each ran against.
 
+`node scripts/extract.mjs --repo <checkout> --output <file>` is the same run under the AppWorks workspace's runner contract: the
+checkout is given by argument, and the artifact is also written to `<file>` (outside the checkout) whatever its results, before the exit
+status is decided. The workspace runs it only after a `generate-files` approval of exactly this plan, revision and assessment
+(`spec/workspace-1.md`).
+
 It exits non-zero unless every required behavior passed, the checkout is unchanged, the artifact reproduces (`--check`) and no mutant
 survives (`--mutations`). It depends on no running server and on no prior state: `MEMOS_BIN` is ignored, and a Memos build made any
 other way gives another runtime digest, which `appworks extract` refuses. `--write` instead regenerates `revisions/2/extraction.json`.

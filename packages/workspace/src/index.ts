@@ -1,0 +1,15 @@
+export * from "./model.js";
+export { loadFlow, recordProblems, FlowError, FLOW_PATH, type WorkflowModel, type StepModel } from "./flow.js";
+export { Store, sha256, type Collection, type Write } from "./store.js";
+export { localAuthority, requireAllowed, environmentCredentials, parseCredentialReference, type Authority, type CredentialResolver } from "./authority.js";
+export { githubProvider, gitProvider, acquireCheckout, type RepositoryProvider, type ResolvedRevision, type ProviderContext } from "./repository.js";
+export { discoverCapabilities, type DiscoveryRecord, type DiscoveredCapabilityRecord } from "./discovery.js";
+export { inspectIntegration, treeHash, type IntegrationRecord } from "./inspect.js";
+export { reconcile, type InventoryRecord, type InventoryCapability, type InventoryCandidate, type ExtractionBinding, type MatchDecision, type MatchStatus } from "./reconcile.js";
+export { listExtractions, directoryDigest, runExtraction, type ExtractionEntry } from "./runner.js";
+export { Workspace, type WorkspaceOptions, type Started } from "./workflow.js";
+export { perform, ACTIONS, RUN_ACTIONS, IMMEDIATE_ACTIONS, type Performed } from "./actions.js";
+export { projectView, advise, type ProjectView, type NextAction } from "./view.js";
+export { createWorkspaceServer, projectSummary, type ServerOptions } from "./server.js";
+export { renderPage, pageSecurityHeaders, verifyVendoredStackUi } from "./ui.js";
+export { main, openWorkspace, type CliEnvironment } from "./cli.js";

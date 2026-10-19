@@ -5,7 +5,7 @@
 | Layer | Responsibility | Where |
 |---|---|---|
 | **AppPort** | Canonical capability contracts, discovery, fulfillment validation, dependency resolution, invocation boundaries, reusable integration primitives (mapping rules, verification, schema compatibility) | `rkendel1/appport`: `@appport/protocol`, `@appport/schema`, `@appport/integration`, `@appport/core`, … |
-| **AppWorks** | Application assessment, business-capability extraction, recipe composition, versioned business packages, replacement planning; later, compilation and execution of business processes | this repository: `@appport/assessment`, `@appport/extraction`, `@appport/recipe`, `@appport/recipe-distribution`; adapters in `extractions/` (private) |
+| **AppWorks** | Application assessment, business-capability extraction, the project workspace that orchestrates them, recipe composition, versioned business packages, replacement planning; later, compilation and execution of business processes | this repository: `@appport/assessment`, `@appport/extraction`, `@appport/recipe`, `@appport/recipe-distribution`, `@appport/workspace` (private application); adapters in `extractions/` (private) |
 | **Distribution Protocol** | Independent publication, acquisition and verification of software releases | `rkendel1/distribution-protocol`: `@distribution-protocol/*` |
 | **Execution and authority infrastructure** | Authorization grants, bindings, execution control, durable state, evidence | AppPort's established layers (`@appport/core`, `@appport/authorization`); unchanged by AppWorks |
 
@@ -38,12 +38,15 @@ require an AppPort release, and an AppPort release does not require an AppWorks 
 
 @appport/assessment ──→ @appport/protocol
 @appport/extraction ──→ @appport/assessment, @appport/protocol, @appport/schema
+@appport/workspace (private) ──→ @appport/extraction, @appport/assessment, @appport/protocol, @appport/client, @appport/github, @feltdb/core
 extractions/* (private adapters) ──→ @appport/sdk at the version the application's own boundary pins; the application's boundary code, loaded in place
 
 AppPort packages ──✗──→ anything in this repository
 @appport/recipe  ──✗──→ @distribution-protocol/*, any registry; @appport/core only as a devDependency (tests)
 @appport/assessment ──✗──→ @appport/core (not even for tests), @distribution-protocol/*, @appport/recipe, @appport/extraction
 @appport/extraction ──✗──→ @appport/core, @appport/sdk, @distribution-protocol/*, any adapter
+@appport/workspace  ──✗──→ @appport/core, @appport/services, another database or scheduler; @appport/sdk only as a devDependency (tests)
+anything else      ──✗──→ @appport/workspace
 ```
 
 1. **AppWorks depends on AppPort; AppPort does not depend on AppWorks.** AppWorks consumes AppPort's **published** packages at exact versions,
@@ -68,7 +71,14 @@ AppPort packages ──✗──→ anything in this repository
    `verifyAssessment`), and has no code-execution or network primitive; only its CLI writes, and only its output. Adapters are
    application-specific code in private packages under `extractions/`, run only by their own verification suites.
 
-`scripts/check-boundary.mjs` enforces 1–4, 6 and 7 on every build (including that `@appport/core` is never a runtime or peer dependency and
+8. **The workspace orchestrates; it does not re-implement.** `@appport/workspace` keeps all durable state in FeltDB 0.12.0, modelled
+   by its `feltdb.flow` (deployed, and enforced on every write). It resolves repositories through `@appport/github`, discovers through
+   `@appport/client`, assesses, validates plans and verifies through `@appport/assessment` and `@appport/extraction`, and runs only the
+   reviewed extraction runner, after an approval. Processes run in `src/repository.ts` (git, against its own isolated checkout) and
+   `src/runner.ts` only; only `src/server.ts` serves HTTP, on loopback. It is private: `@appport/github` 1.0.2 brings a second, older
+   AppPort stack, which a published library must not.
+
+`scripts/check-boundary.mjs` enforces 1–4, 6, 7 and 8 on every build (including that `@appport/core` is never a runtime or peer dependency and
 never imported by shipped source). Rule 5 is a review rule.
 
 ## 4. How the recipe layer uses AppPort
@@ -115,7 +125,21 @@ way to publish a claim. The host checks the declaration against the contract bef
 after, and stops otherwise. Discovery uses AppPort's client (`appport.manifest`), and the claim is judged by AppPort's `claimsFor` and
 `evaluateFulfillment`. AppWorks adds no declaration format, registry or authority, and the claim grants nothing.
 
-## 7. Authority and evidence
+## 7. How the workspace uses the stack
+
+| The workspace needs | It uses |
+|---|---|
+| Durable state, schema, concurrency | FeltDB 0.12.0: `deployFlowSpec` of `feltdb.flow`, `transaction` with `requireAbsent` / `ifVersion`, `updateIfVersion`, indexes |
+| Repository refs, branches, commits, pull requests | `@appport/github` 1.0.2 (`repositories.get/source`, `branches.get`, `commits.list`, `pullRequests.list/create`), capabilities decided by the workspace authority |
+| The commit's files | git, by SHA, into an isolated checkout (no `@appport/github` contract exists for it) |
+| Existing capabilities | `@appport/client` `discoverApplication`; claims through `@appport/protocol` `claimsFor` and `evaluateFulfillment` |
+| Assessment, plan validation, verification | `assessRepository`, `verifyAssessment`; `createExtraction` (without results), `readPlan`, `candidateRefusals`, `verifyExtractionAt` |
+| Presentation | stack-ui 0.5.0 static release (vendored, unmodified) |
+
+Not used, with the reason in `spec/workspace-1.md` §10 and the package README: `@appport/services` jobs, secrets, API keys and webhooks;
+Chip; AuthBoundry in process.
+
+## 8. Authority and evidence
 
 AppWorks introduces none. In particular:
 
@@ -126,6 +150,8 @@ AppWorks introduces none. In particular:
   `VerificationEvidence`;
 * an assessment's evidence describes source text (observed), conclusions drawn from it (inferred) and what could not be determined
   (unknown). It is not AppPort verification evidence, and its `scope` states that it grants nothing, verifies nothing and modified nothing;
+* the workspace's approvals are per action class and per exact subject, and are enforced where the action runs; a verified extraction
+  is not an approval, and `ready-for-promotion` deploys nothing;
 * an extraction's verification records state, per behavior, what a named procedure established for one source revision, contract and
   adapter. They are not authorization: a caller still needs its own application credential and AppPort's authorization at the boundary,
   and discovering the capability grants nothing.

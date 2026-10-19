@@ -13,7 +13,10 @@
 //   10. report passed, failed and not-run separately         exit 0 only if every required behavior passed
 //
 //   MEMOS_REPO=<checkout at the pinned revision> node scripts/extract.mjs [--write | --check] [--mutations]
+//   node scripts/extract.mjs --repo <checkout> --output <file>          (the AppWorks workspace's runner contract)
 //
+// --repo names the checkout instead of MEMOS_REPO. --output also writes the produced artifact to <file> (outside the
+// checkout), whether or not every behavior passed, before the exit status is decided.
 // --write replaces revisions/<n>/extraction.json for the plan's revision; --check (CI) fails unless the regenerated
 // artifact has the committed digest. --mutations also runs scripts/mutations.mjs. Nothing depends on a previously
 // running server or on MEMOS_BIN (ignored here: the declared build is always made). Intermediate files go to a temporary
@@ -28,12 +31,24 @@ import { main, readPlan, verifyExtractionAt } from "@appport/extraction";
 import { PINNED_REVISION, treeHash } from "../test/support/verification.mjs";
 
 const here = join(dirname(fileURLToPath(import.meta.url)), "..");
-const repo = process.env.MEMOS_REPO ? resolve(process.env.MEMOS_REPO) : undefined;
+const args = process.argv.slice(2);
+const valueOf = (flag) => {
+  const at = args.indexOf(flag);
+  if (at === -1) return undefined;
+  const value = args[at + 1];
+  if (!value || value.startsWith("--")) {
+    console.error(`${flag} needs a value`);
+    process.exit(2);
+  }
+  return resolve(value);
+};
+const repoArg = valueOf("--repo");
+const outputArg = valueOf("--output");
+const repo = repoArg ?? (process.env.MEMOS_REPO ? resolve(process.env.MEMOS_REPO) : undefined);
 if (!repo) {
-  console.error("MEMOS_REPO is not set: it names the Memos checkout at the source revision");
+  console.error("neither --repo nor MEMOS_REPO is set: it names the Memos checkout at the source revision");
   process.exit(2);
 }
-const args = process.argv.slice(2);
 const mode = args.find((a) => a === "--write" || a === "--check") ?? "--dry-run";
 const work = mkdtempSync(join(tmpdir(), "appworks-extraction-"));
 const fail = (message) => {
@@ -79,6 +94,10 @@ console.log("8. verification record and digest");
 step("extraction", main(["extract", files.assessment, "--candidate", plan.candidate, "--repo", repo, "--plan", join(here, "extraction-plan.json"), "--verification", files.results, ...(previous ? ["--previous", previous] : []), "--output", files.extraction]));
 step("extraction verification", main(["verify-extraction", files.extraction, "--assessment", files.assessment, "--repo", repo, "--plan-dir", here]));
 const produced = JSON.parse(readFileSync(files.extraction, "utf8"));
+if (outputArg) {
+  copyFileSync(files.extraction, outputArg);
+  console.log(`   wrote ${outputArg}`);
+}
 
 console.log("9. checkout");
 const unchanged = treeHash(repo) === before;
