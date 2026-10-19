@@ -20,6 +20,7 @@ import { lstatSync, realpathSync, writeFileSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RepositoryError, assessmentCli, isInside, repositoryRoot, type ApplicationAssessment, type CliIO } from "@appport/assessment";
+import { fulfillmentClaims } from "@appport/protocol";
 import { TOOL_NAME, TOOL_VERSION, type CapabilityExtraction } from "./artifact.js";
 import { ExtractionRefused, createExtraction, type VerificationResults } from "./extract.js";
 import { InputError, observeCheckout, readJson, readPlan, verifyExtractionAt } from "./files.js";
@@ -51,21 +52,46 @@ function parse(args: string[], flags: string[], valued: string[]) {
   return { positional, options };
 }
 
-function summary(x: CapabilityExtraction, output: string): string {
+/** The report: every section separately, and never an overall success while a required behavior has not passed. */
+export function report(x: CapabilityExtraction): string[] {
   const s = x.verification.summary;
-  const notPassed = x.verification.records.filter((r) => r.status !== "passed").map((r) => `${r.behavior} (${r.status})`);
+  const records = x.verification.records;
+  const status = (behavior: string) => records.find((r) => r.behavior === behavior)?.status ?? "not recorded";
+  const group = (label: string, pick: (r: (typeof records)[number]) => boolean) => {
+    const ids = records.filter(pick).map((r) => r.behavior);
+    return ids.length ? [`    ${label}: ${ids.join(", ")}`] : [];
+  };
+  const claim = x.fulfillment ? fulfillmentClaims({ attributes: x.fulfillment.attributes }, x.fulfillment.provider.capability, x.fulfillment.provider.version)[0] : undefined;
+  const notPassed = records.length - s.passed;
   return [
-    `${x.stage === "implemented" ? "Extraction" : "Proposed extraction"} ${x.identity.name} revision ${x.identity.revision}`,
-    `  source: ${x.source.name} ${x.source.operation.fullMethod} at ${x.source.revision.slice(0, 12)}`,
+    `${x.stage === "implemented" ? "Extraction" : "Proposed extraction"} ${x.identity.name} revision ${x.identity.revision} (${x.format})${x.identity.previous ? `, replacing ${x.identity.previous}` : ""}`,
+    `  source: ${x.source.name} ${x.source.operation.fullMethod} at ${x.source.revision}`,
+    `  assessment: ${x.assessment.digest} (candidate ${x.assessment.candidate.id})`,
     `  contract: ${x.contract.capability.contract} ${x.contract.capability.name}@${x.contract.capability.version} ${x.contract.capabilityDigest}`,
     `  adapter: ${x.adapter ? `${x.adapter.name} ${x.adapter.version} ${x.adapter.digest}` : "none"}`,
-    `  verification: ${s.passed} passed, ${s.failed} failed, ${s.inconclusive} inconclusive, ${s["not-run"]} not run, of ${x.verification.records.length} behaviors`,
-    ...(notPassed.length ? [`  not verified: ${notPassed.join(", ")}`] : []),
+    `  fulfillment declaration: ${x.fulfillment && claim ? `${x.fulfillment.provider.application} ${x.fulfillment.provider.capability}@${x.fulfillment.provider.version} claims ${claim.contract} ${claim.capability}@${claim.version} ${claim.digest} (declaration ${x.fulfillment.digest})` : "none"}`,
+    ...(x.runtime ? [`  runtime: ${Object.entries({ ...x.runtime.packages, ...x.runtime.application }).map(([k, v]) => `${k}=${v}`).join(", ")}; node ${x.runtime.node}`] : []),
+    `  declaration published and discovered: ${status("integration.fulfillment-claim")}; fails closed: ${status("integration.declaration-fails-closed")}`,
+    `  authorization: ${records.filter((r) => r.category === "authorization").map((r) => `${r.behavior.replace(/^authorization\./, "")} ${r.status}`).join(", ")}`,
+    `  checkout unchanged and at the source revision: ${status("integration.source-revision")}`,
+    `  behaviors: ${s.passed} passed, ${s.failed} failed, ${s.inconclusive} inconclusive, ${s["not-run"]} not run, of ${records.length} required`,
+    ...group("passed against the real application", (r) => r.status === "passed" && r.against === "real-application"),
+    ...group("passed against a stub application only", (r) => r.status === "passed" && r.against === "stub-application"),
+    ...group("passed by static or protocol checks", (r) => r.status === "passed" && (r.against === "none" || r.against === undefined)),
+    ...group("FAILED", (r) => r.status === "failed"),
+    ...group("INCONCLUSIVE", (r) => r.status === "inconclusive"),
+    ...group("NOT RUN (unsupported or not yet verified)", (r) => r.status === "not-run"),
     ...x.findings.map((f) => `  ${f.code}: ${f.message}`),
+    notPassed
+      ? `  overall: NOT VERIFIED: ${notPassed} of ${records.length} required behaviors did not pass`
+      : `  overall: every required behavior passed for exactly this source revision, contract, adapter, declaration and runtime (not equivalence beyond them)`,
     `  ${x.questions.length} open questions; this artifact grants nothing, deploys nothing and modified nothing`,
-    `  digest: ${x.digest}`,
-    `  written: ${output}`
-  ].join("\n");
+    `  digest: ${x.digest}`
+  ];
+}
+
+function summary(x: CapabilityExtraction, output: string): string {
+  return [...report(x), `  written: ${output}`].join("\n");
 }
 
 function outputPath(path: string, root: string, force: boolean): string {
@@ -131,6 +157,7 @@ export function main(argv: string[], io: CliIO = { out: (t) => process.stdout.wr
       if (result.ok) {
         const x = extraction as CapabilityExtraction;
         io.out(`valid ${x.format} ${x.identity.name} revision ${x.identity.revision} ${x.digest}`);
+        if (x.format !== "appport.capability-extraction/1") for (const line of report(x).slice(1)) io.out(line);
         return 0;
       }
       for (const f of result.findings) io.err(`${f.code} ${f.path}: ${f.message}`);

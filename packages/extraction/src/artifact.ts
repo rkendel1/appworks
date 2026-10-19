@@ -8,7 +8,12 @@
  * beyond the behaviors whose verification records say `passed` for exactly this source, contract and adapter.
  */
 import {
+  FULFILLMENT_EXTENSION,
   canonicalize,
+  claimFor,
+  fulfillmentAttributes,
+  fulfillmentClaims,
+  getFulfillment,
   capabilityDigest,
   compareSchemas,
   contractDigest,
@@ -20,15 +25,22 @@ import {
   lintIntegration,
   sha256,
   type AppPortManifest,
+  type JsonValue,
   type JSONSchema,
   type ManifestChange
 } from "@appport/protocol";
 import { fromJSONSchema } from "@appport/schema";
 import type { Evidence, Location } from "@appport/assessment";
 
-export const EXTRACTION_FORMAT = "appport.capability-extraction/1";
-export const EXTRACTION_PLAN_FORMAT = "appport.capability-extraction-plan/1";
-export const VERIFICATION_RESULTS_FORMAT = "appport.capability-verification-results/1";
+/** The format `createExtraction` writes. `/2` adds the fulfillment declaration and the runtime configuration (§9). */
+export const EXTRACTION_FORMAT = "appport.capability-extraction/2";
+/** Read, never written: artifacts in this format are verified with the `/1` rules, unchanged. */
+export const EXTRACTION_FORMAT_V1 = "appport.capability-extraction/1";
+export const EXTRACTION_FORMATS = [EXTRACTION_FORMAT_V1, EXTRACTION_FORMAT] as const;
+export type ExtractionFormat = (typeof EXTRACTION_FORMATS)[number];
+export const EXTRACTION_PLAN_FORMAT = "appport.capability-extraction-plan/2";
+export const EXTRACTION_PLAN_FORMAT_V1 = "appport.capability-extraction-plan/1";
+export const VERIFICATION_RESULTS_FORMAT = "appport.capability-verification-results/2";
 export const TOOL_NAME = "@appport/extraction";
 export const TOOL_VERSION = "0.1.0";
 
@@ -36,13 +48,16 @@ export const VERIFICATION_STATUSES = ["not-run", "passed", "failed", "inconclusi
 export type VerificationStatus = (typeof VERIFICATION_STATUSES)[number];
 export const PROCEDURE_KINDS = ["integration-test", "unit-test", "static-check", "protocol-check"] as const;
 export type ProcedureKind = (typeof PROCEDURE_KINDS)[number];
+/** What a `/2` result was obtained against: the real application, a stub standing in for it, or neither (static and protocol checks). */
+export const VERIFICATION_TARGETS = ["real-application", "stub-application", "none"] as const;
+export type VerificationTarget = (typeof VERIFICATION_TARGETS)[number];
 
 /**
  * The behaviors every read-only extraction must account for. Each is verified separately; none implies another. A
  * schema check is not behavioral verification, an invocation is not authorization correctness, and a passing run
  * establishes the behavior for the states it exercised, not for every state of the application.
  */
-export const BEHAVIORS = {
+export const BEHAVIORS_V1 = {
   "contract.output-shape": { category: "contract", description: "Valid input produces output of the contracted shape, equal to the source operation's answer." },
   "contract.invalid-input": { category: "contract", description: "Invalid input is rejected, by the contract or by the source operation, and never answered as success." },
   "contract.optional-fields": { category: "contract", description: "Missing and optional fields keep the source operation's semantics; absent proto3 fields map to their defaults, nothing becomes null." },
@@ -62,8 +77,23 @@ export const BEHAVIORS = {
   "integration.source-revision": { category: "integration", description: "The application tested is the recorded source revision, unchanged by the test run." },
   "integration.fulfillment-claim": { category: "integration", description: "The boundary publishes a fulfillment claim for the contract that AppPort's evaluateFulfillment accepts." }
 } as const satisfies Record<string, { category: "contract" | "authorization" | "error" | "integration"; description: string }>;
+
+/**
+ * The `/2` behaviors: the `/1` behaviors with the fulfillment claim stated precisely, and three more for the
+ * declaration and the data a capability may return.
+ */
+export const BEHAVIORS = {
+  ...BEHAVIORS_V1,
+  "integration.fulfillment-claim": { category: "integration", description: "The boundary publishes the extraction's fulfillment declaration in its manifest, AppPort client discovery returns it, and AppPort's evaluateFulfillment finds the claim valid against the contract." },
+  "integration.declaration-fails-closed": { category: "integration", description: "A missing, malformed, mismatched, stale or unpublished fulfillment declaration is refused with a reason code; nothing falls back to an undeclared or permissive capability." },
+  "authorization.claim-not-authority": { category: "authorization", description: "A published fulfillment claim confers no authority: callers without a valid credential, or denied by the application, stay denied." },
+  "contract.no-sensitive-data": { category: "contract", description: "Outputs carry only the contracted fields: no credential, secret or unrelated personal data, and no echo of the caller's credential." }
+} as const satisfies Record<string, { category: "contract" | "authorization" | "error" | "integration"; description: string }>;
 export type BehaviorId = keyof typeof BEHAVIORS;
 export const REQUIRED_BEHAVIORS = Object.keys(BEHAVIORS).sort() as BehaviorId[];
+export const REQUIRED_BEHAVIORS_V1 = Object.keys(BEHAVIORS_V1).sort() as BehaviorId[];
+/** The behavior catalog of a format. */
+export const behaviorsOf = (format: string): Record<string, { category: string; description: string }> => (format === EXTRACTION_FORMAT_V1 ? BEHAVIORS_V1 : BEHAVIORS);
 
 export interface VerificationRecord {
   behavior: BehaviorId;
@@ -72,8 +102,10 @@ export interface VerificationRecord {
   status: VerificationStatus;
   /** How it is verified: the kind of procedure and where it is (test file and name). Absent while `not-run` with no procedure. */
   procedure?: { kind: ProcedureKind; reference: string };
-  /** What was verified. A result applies only while all three equal the artifact's own. */
-  subject: { sourceRevision: string; capabilityDigest: string; adapterDigest: string | null };
+  /** `/2`: what the result was obtained against. */
+  against?: VerificationTarget;
+  /** What was verified. A result applies only while every member equals the artifact's own (`/2` adds the declaration and runtime digests). */
+  subject: { sourceRevision: string; capabilityDigest: string; adapterDigest: string | null; declarationDigest?: string | null; runtimeDigest?: string };
   /** The individual results (test names, checks) that produced the status. Required unless `not-run`. */
   results: string[];
   limitations: string[];
@@ -113,8 +145,25 @@ export interface AdapterIdentity {
   digest: string;
 }
 
+/** The fulfillment declaration the adapter's host publishes: AppPort manifest extensions and attributes (`appport.fulfillment/1`). */
+export interface FulfillmentDeclaration {
+  /** The provider capability that makes the claim, in the application whose boundary publishes it. */
+  provider: { application: string; capability: string; version: number };
+  extensions: string[];
+  attributes: Record<string, JsonValue>;
+  /** digestOf of provider, extensions and attributes. */
+  digest: string;
+}
+
+/** The runtime the verification ran on, as declared: exact packages, how the application was built and stored, the Node range. */
+export interface RuntimeConfiguration {
+  packages: Record<string, string>;
+  application: Record<string, string>;
+  node: string;
+}
+
 export interface CapabilityExtraction {
-  format: typeof EXTRACTION_FORMAT;
+  format: ExtractionFormat;
   /** Volatile: excluded from the digest. */
   extraction: { id: string; createdAt: string; verificationRun?: { startedAt: string; finishedAt: string; runner: string } };
   tool: { name: string; version: string };
@@ -141,6 +190,10 @@ export interface CapabilityExtraction {
     mapping: Mapping;
   };
   adapter: AdapterIdentity | null;
+  /** `/2` only. */
+  fulfillment?: FulfillmentDeclaration | null;
+  /** `/2` only. */
+  runtime?: RuntimeConfiguration;
   dependencies: { packages: Record<string, string>; application: string[]; environment: string[] };
   authorization: { requirements: string[]; restrictions: string[]; evidence: string[] };
   sideEffects: { effect: "observation"; persistence: Array<{ operation: "read"; statement: string; evidence: string[] }>; evidence: string[] };
@@ -161,6 +214,43 @@ export function extractionDigest(artifact: Omit<CapabilityExtraction, "digest"> 
 
 /** The digest of a file's bytes, as text: `sha256:` and AppPort's sha256 of the UTF-8 content. */
 export const fileDigest = (text: string) => `sha256:${sha256(text)}`;
+
+export function declarationDigest(declaration: Omit<FulfillmentDeclaration, "digest">): string {
+  const { digest: _d, ...content } = declaration as FulfillmentDeclaration;
+  return digestOf(content);
+}
+
+export const runtimeDigest = (runtime: RuntimeConfiguration): string => digestOf(runtime);
+
+/**
+ * Problems with a fulfillment declaration for a contract: the codes `FULFILLMENT_MALFORMED`, `FULFILLMENT_MISSING` (no
+ * claim for the provider capability), `FULFILLMENT_MISMATCH` (another contract, capability or version, or anything beyond
+ * the one claim `claimFor` makes), `FULFILLMENT_STALE` (a digest other than the contract's current capability digest).
+ */
+export function fulfillmentProblems(declaration: unknown, canonical: AppPortManifest, capability: { name: string; version: number }): Array<{ code: string; message: string }> {
+  const d = declaration as FulfillmentDeclaration;
+  if (!isObject(d) || !isObject(d.provider) || typeof d.provider.capability !== "string" || !Number.isInteger(d.provider.version) || typeof d.provider.application !== "string" || !Array.isArray(d.extensions) || !isObject(d.attributes))
+    return [{ code: "FULFILLMENT_MALFORMED", message: "a declaration has a provider, extensions and attributes" }];
+  const manifest = { extensions: d.extensions, attributes: d.attributes } as Pick<AppPortManifest, "extensions" | "attributes">;
+  if (!d.extensions.includes(FULFILLMENT_EXTENSION) || !getFulfillment(manifest)) return [{ code: "FULFILLMENT_MALFORMED", message: `the declaration does not advertise ${FULFILLMENT_EXTENSION} with a capabilities map` }];
+  const claims = fulfillmentClaims(manifest, d.provider.capability, d.provider.version);
+  if (!claims.length) return [{ code: "FULFILLMENT_MISSING", message: `no claim for ${d.provider.capability}@${d.provider.version}` }];
+  let expected;
+  try {
+    expected = claimFor(canonical, capability.name, capability.version);
+  } catch (error) {
+    return [{ code: "FULFILLMENT_MISMATCH", message: (error as Error).message }];
+  }
+  const out: Array<{ code: string; message: string }> = [];
+  for (const claim of claims) {
+    if (claim?.contract !== expected.contract || claim.capability !== expected.capability || claim.version !== expected.version)
+      out.push({ code: "FULFILLMENT_MISMATCH", message: `the claim names ${claim?.contract} ${claim?.capability}@${claim?.version}; the contract defines ${expected.contract} ${expected.capability}@${expected.version}` });
+    else if (claim.digest !== expected.digest) out.push({ code: "FULFILLMENT_STALE", message: `the claim pins ${claim.digest}; the contract's capability is ${expected.digest}` });
+  }
+  if (!out.length && canonicalize(manifest) !== canonicalize(fulfillmentAttributes({ capabilities: { [`${d.provider.capability}@${d.provider.version}`]: [expected] } })))
+    out.push({ code: "FULFILLMENT_MISMATCH", message: "the declaration contains more than the one claim the contract supports" });
+  return out;
+}
 
 export function adapterDigest(adapter: Omit<AdapterIdentity, "digest">): string {
   const { digest: _d, ...content } = adapter as AdapterIdentity;
@@ -269,8 +359,10 @@ export interface VerificationFinding {
   message: string;
 }
 
-const TOP_LEVEL = ["format", "extraction", "tool", "identity", "stage", "assessment", "source", "contract", "adapter", "dependencies", "authorization", "sideEffects", "verification", "evidence", "findings", "limitations", "questions", "scope", "digest"];
-const RECORD_MEMBERS = ["behavior", "category", "description", "status", "procedure", "subject", "results", "limitations"];
+const TOP_LEVEL_V1 = ["format", "extraction", "tool", "identity", "stage", "assessment", "source", "contract", "adapter", "dependencies", "authorization", "sideEffects", "verification", "evidence", "findings", "limitations", "questions", "scope", "digest"];
+const TOP_LEVEL_V2 = [...TOP_LEVEL_V1.slice(0, 9), "fulfillment", "runtime", ...TOP_LEVEL_V1.slice(9)];
+const RECORD_MEMBERS_V1 = ["behavior", "category", "description", "status", "procedure", "subject", "results", "limitations"];
+const RECORD_MEMBERS_V2 = [...RECORD_MEMBERS_V1, "against"];
 const SCOPE = { grantsAuthority: false, executable: false, establishesEquivalence: false, modifiesTarget: false, deploys: false };
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
@@ -313,7 +405,15 @@ export function verifyExtraction(value: unknown, options: VerifyExtractionOption
   const findings: VerificationFinding[] = [];
   const add = (code: string, path: string, message: string) => findings.push({ code, path, message });
   if (!isObject(value)) return { ok: false, findings: [{ code: "EXTRACTION_MALFORMED", path: "", message: "an extraction is a JSON object" }] };
-  if (value.format !== EXTRACTION_FORMAT) add("EXTRACTION_FORMAT", "/format", `unsupported format ${JSON.stringify(value.format)}; this reader implements ${EXTRACTION_FORMAT}`);
+  if (!EXTRACTION_FORMATS.includes(value.format as ExtractionFormat)) {
+    add("EXTRACTION_FORMAT", "/format", `unsupported format ${JSON.stringify(value.format)}; this reader implements ${EXTRACTION_FORMATS.join(" and ")}`);
+    return { ok: false, findings };
+  }
+  const v1 = value.format === EXTRACTION_FORMAT_V1;
+  const TOP_LEVEL = v1 ? TOP_LEVEL_V1 : TOP_LEVEL_V2;
+  const RECORD_MEMBERS = v1 ? RECORD_MEMBERS_V1 : RECORD_MEMBERS_V2;
+  const catalog = behaviorsOf(value.format as string);
+  const required = Object.keys(catalog).sort();
   for (const key of Object.keys(value)) if (!TOP_LEVEL.includes(key)) add("EXTRACTION_MEMBER", `/${key}`, `undocumented member "${key}"`);
   for (const key of TOP_LEVEL) if (!(key in value)) add("EXTRACTION_MEMBER", `/${key}`, `missing member "${key}"`);
   if (findings.length) return { ok: false, findings };
@@ -405,18 +505,33 @@ export function verifyExtraction(value: unknown, options: VerifyExtractionOption
     }
   }
 
+  // Fulfillment declaration and runtime (/2).
+  if (!v1) {
+    const f = x.fulfillment;
+    if (f !== null) {
+      if (x.stage !== "implemented") add("FULFILLMENT_STAGE", "/fulfillment", "only an implemented extraction declares fulfillment");
+      if (isObject(x.contract) && isObject(x.contract.capability))
+        for (const p of fulfillmentProblems(f, x.contract.canonical, x.contract.capability)) add(p.code, "/fulfillment", p.message);
+      if (isObject(f) && f.digest !== declarationDigest(f)) add("FULFILLMENT_DIGEST", "/fulfillment/digest", "the declaration digest does not match the declaration");
+    }
+    const r = x.runtime;
+    if (!isObject(r) || !isObject(r.packages) || !isObject(r.application) || typeof r.node !== "string") add("RUNTIME_MALFORMED", "/runtime", "the runtime names packages, the application build and a Node range");
+  }
+
   // Verification.
   const v = x.verification;
-  const expectedSubject = { sourceRevision: x.source?.revision, capabilityDigest: x.contract?.capabilityDigest, adapterDigest: x.adapter?.digest ?? null };
+  const expectedSubject = v1
+    ? { sourceRevision: x.source?.revision, capabilityDigest: x.contract?.capabilityDigest, adapterDigest: x.adapter?.digest ?? null }
+    : { sourceRevision: x.source?.revision, capabilityDigest: x.contract?.capabilityDigest, adapterDigest: x.adapter?.digest ?? null, declarationDigest: x.fulfillment?.digest ?? null, runtimeDigest: isObject(x.runtime) ? runtimeDigest(x.runtime) : null };
   if (!isObject(v) || !Array.isArray(v.records)) add("VERIFICATION_MALFORMED", "/verification", "verification has records");
   else {
-    if (canonicalize(v.required) !== canonicalize(REQUIRED_BEHAVIORS)) add("VERIFICATION_REQUIRED", "/verification/required", `the required behaviors are ${REQUIRED_BEHAVIORS.join(", ")}`);
+    if (canonicalize(v.required) !== canonicalize(required)) add("VERIFICATION_REQUIRED", "/verification/required", `the required behaviors are ${required.join(", ")}`);
     const seen = new Set<string>();
     v.records.forEach((r, k) => {
       const at = `/verification/records/${k}`;
       if (!isObject(r)) return add("VERIFICATION_MALFORMED", at, "a record is an object");
       for (const key of Object.keys(r)) if (!RECORD_MEMBERS.includes(key)) add("VERIFICATION_MEMBER", `${at}/${key}`, `undocumented member "${key}"`);
-      const behavior = BEHAVIORS[r.behavior as BehaviorId];
+      const behavior = catalog[r.behavior as string];
       if (!behavior) return add("VERIFICATION_BEHAVIOR", `${at}/behavior`, `unknown behavior ${JSON.stringify(r.behavior)}`);
       if (seen.has(r.behavior)) add("VERIFICATION_DUPLICATE", `${at}/behavior`, `${r.behavior} is recorded twice`);
       seen.add(r.behavior);
@@ -425,11 +540,13 @@ export function verifyExtraction(value: unknown, options: VerifyExtractionOption
       if (r.status !== "not-run") {
         if (!isObject(r.procedure) || !PROCEDURE_KINDS.includes(r.procedure.kind) || typeof r.procedure.reference !== "string" || !r.procedure.reference) add("VERIFICATION_EVIDENCE", `${at}/procedure`, "a result names the procedure that produced it");
         if (!Array.isArray(r.results) || !r.results.length) add("VERIFICATION_EVIDENCE", `${at}/results`, "a result lists the checks that produced it");
-        if (canonicalize(r.subject) !== canonicalize(expectedSubject)) add("VERIFICATION_STALE", `${at}/subject`, "this result was produced for another source revision, contract or adapter, and is not evidence for this one");
+        if (canonicalize(r.subject) !== canonicalize(expectedSubject)) add("VERIFICATION_STALE", `${at}/subject`, "this result was produced for another source revision, contract, adapter, declaration or runtime, and is not evidence for this one");
+        if (!v1 && !VERIFICATION_TARGETS.includes(r.against as VerificationTarget)) add("VERIFICATION_TARGET", `${at}/against`, `a result says what it was obtained against: ${VERIFICATION_TARGETS.join(", ")}`);
       }
+      if (!v1 && r.status === "not-run" && r.against !== "none") add("VERIFICATION_TARGET", `${at}/against`, "a result that was not run was obtained against nothing");
       if (r.status === "passed" && x.stage !== "implemented") add("VERIFICATION_STAGE", `${at}/status`, "nothing is verified before an adapter exists");
     });
-    for (const id of REQUIRED_BEHAVIORS) if (!seen.has(id)) add("VERIFICATION_MISSING", "/verification/records", `${id} has no record`);
+    for (const id of required) if (!seen.has(id)) add("VERIFICATION_MISSING", "/verification/records", `${id} has no record`);
     const summary = Object.fromEntries(VERIFICATION_STATUSES.map((s) => [s, v.records.filter((r) => isObject(r) && r.status === s).length]));
     if (canonicalize(v.summary) !== canonicalize(summary)) add("VERIFICATION_SUMMARY", "/verification/summary", "the summary does not count the records");
   }

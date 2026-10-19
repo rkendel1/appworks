@@ -72,7 +72,17 @@ export function readPlan(planPath: string, repository: string): NonNullable<Extr
       /* reported as BOUNDARY_FILE_MISSING */
     }
   }
-  return { plan, contract, adapterFiles, boundaryFiles };
+  let declaration: unknown;
+  if (plan.fulfillment && typeof plan.fulfillment.declaration === "string") {
+    const text = readContained(base, plan.fulfillment.declaration);
+    if (text !== undefined)
+      try {
+        declaration = JSON.parse(text);
+      } catch {
+        declaration = null;
+      }
+  }
+  return { plan, contract, adapterFiles, boundaryFiles, ...(declaration !== undefined ? { declaration } : {}) };
 }
 
 /** The checkout's revision and the assessment's location check against it. */

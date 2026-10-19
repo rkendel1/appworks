@@ -1,0 +1,1737 @@
+{
+  "format": "appport.capability-extraction/2",
+  "extraction": {
+    "id": "46983833-4296-49b4-af04-0f405f5a7253",
+    "createdAt": "2026-10-19T17:52:19.909Z",
+    "verificationRun": {
+      "startedAt": "2026-10-19T17:52:11.060Z",
+      "finishedAt": "2026-10-19T17:52:19.126Z",
+      "runner": "node v22.22.0"
+    }
+  },
+  "tool": {
+    "name": "@appport/extraction",
+    "version": "0.1.0"
+  },
+  "identity": {
+    "name": "memos.reactions.list",
+    "revision": 2,
+    "previous": "sha256:81011ddc62b9f3dddf1b8ac54b5d499be2c58bbb8aae0bd65968afd58f550e41"
+  },
+  "stage": "implemented",
+  "assessment": {
+    "format": "appport.application-assessment/1",
+    "digest": "sha256:903ff71d3605c003636e258d3f416746daa2d92f1e063350aa10358569669267",
+    "tool": {
+      "name": "@appport/assessment",
+      "version": "0.1.0"
+    },
+    "scanner": "appport.assessment-scanner/1",
+    "candidate": {
+      "id": "cand-memos.api.MemoService.ListMemoReactions",
+      "digest": "sha256:36608d9fcb957540293237fdbbe116a3e6ff0fb096e3509f11d66c6f552141c9"
+    }
+  },
+  "source": {
+    "name": "memos",
+    "repository": "https://github.com/rkendel1/memos",
+    "revision": "e0ce8569589b2eccafd13e262ea3e320251858f2",
+    "operation": {
+      "kind": "rpc",
+      "service": "memos.api.MemoService",
+      "method": "ListMemoReactions",
+      "fullMethod": "/memos.api.MemoService/ListMemoReactions",
+      "http": "GET /api/{parent=memos/*}/reactions"
+    },
+    "entryPoints": [
+      {
+        "kind": "proto-rpc",
+        "subject": "/memos.api.MemoService/ListMemoReactions",
+        "evidence": [
+          "ev-162b62b11e5b3c85"
+        ]
+      },
+      {
+        "kind": "http-binding",
+        "subject": "GET /api/{parent=memos/*}/reactions",
+        "evidence": [
+          "ev-8f58ad3c02cf7521"
+        ]
+      }
+    ],
+    "implementation": {
+      "symbol": "server/api:APIService.ListMemoReactions",
+      "location": {
+        "path": "server/api/reaction_service.go",
+        "startLine": 18,
+        "endLine": 51
+      },
+      "evidence": [
+        "ev-a34fec1b9c57c694",
+        "ev-b529c5da4a30e5f3"
+      ]
+    },
+    "tests": [
+      {
+        "symbol": "TestMoveMemoPreservesIndependentConversation",
+        "path": "server/api/test/memo_move_test.go",
+        "evidence": [
+          "ev-648ad0b6cd340132"
+        ]
+      },
+      {
+        "symbol": "TestMemoReadFailsClosedForMissingCreatorBeforePaginationAndChildren",
+        "path": "server/api/test/memo_service_test.go",
+        "evidence": [
+          "ev-30a69cfa46e14127"
+        ]
+      },
+      {
+        "symbol": "TestAssignedMemoReactionsFollowMemoReadAccess",
+        "path": "server/api/test/reaction_service_test.go",
+        "evidence": [
+          "ev-93702a4541c9a2e5"
+        ]
+      },
+      {
+        "symbol": "TestListMemoReactionsSkipsMissingCreators",
+        "path": "server/api/test/reaction_service_test.go",
+        "evidence": [
+          "ev-977e634ebb7b28fc"
+        ]
+      },
+      {
+        "symbol": "TestMemoReactionResourceNames",
+        "path": "server/api/test/reaction_service_test.go",
+        "evidence": [
+          "ev-fb7daa9fc34fb0da"
+        ]
+      }
+    ]
+  },
+  "contract": {
+    "canonical": {
+      "protocol": "appport/1",
+      "application": {
+        "id": "org.appworks.contracts.memos",
+        "name": "Memos capabilities (proposed canonical contract)",
+        "version": "1.0.0",
+        "description": "Canonical contract proposed by the AppWorks extraction of Memos MemoService.ListMemoReactions at c0eeec7a260ee58e2ed1514a61bfff1fa013f42e. Proposed, not adopted: it defines what a provider must offer, and grants nothing."
+      },
+      "extensions": [
+        "appport.canonical-contract/1"
+      ],
+      "capabilities": [
+        {
+          "name": "memos.reactions.list",
+          "versions": [
+            1
+          ],
+          "latestVersion": 1,
+          "description": "List the reactions on one memo, if Memos lets the caller read that memo.",
+          "kind": "request",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "parent": {
+                "type": "string",
+                "description": "Memo resource name, e.g. memos/AbC123",
+                "pattern": "^memos/[A-Za-z0-9_-]{1,64}$"
+              },
+              "pageSize": {
+                "type": "integer",
+                "minimum": -2147483648,
+                "maximum": 2147483647
+              },
+              "pageToken": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "parent"
+            ]
+          },
+          "outputSchema": {
+            "type": "object",
+            "properties": {
+              "reactions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "description": "memos/{memo}/reactions/{reaction}"
+                    },
+                    "creator": {
+                      "type": "string",
+                      "description": "users/{user}"
+                    },
+                    "reactionType": {
+                      "type": "string"
+                    },
+                    "createTime": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "name",
+                    "creator",
+                    "reactionType",
+                    "createTime"
+                  ]
+                }
+              },
+              "nextPageToken": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false,
+            "required": [
+              "reactions",
+              "nextPageToken"
+            ]
+          },
+          "authorization": [
+            "memos.read"
+          ],
+          "effect": "observation",
+          "authorizationContract": {
+            "required": true,
+            "scopes": [
+              "memos.read"
+            ]
+          },
+          "authorizationVersion": 1,
+          "idempotency": "unsupported",
+          "concurrency": {
+            "mode": "parallel"
+          },
+          "definitions": [
+            {
+              "version": 1,
+              "description": "List the reactions on one memo, if Memos lets the caller read that memo.",
+              "kind": "request",
+              "inputSchema": {
+                "type": "object",
+                "properties": {
+                  "parent": {
+                    "type": "string",
+                    "description": "Memo resource name, e.g. memos/AbC123",
+                    "pattern": "^memos/[A-Za-z0-9_-]{1,64}$"
+                  },
+                  "pageSize": {
+                    "type": "integer",
+                    "minimum": -2147483648,
+                    "maximum": 2147483647
+                  },
+                  "pageToken": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "parent"
+                ]
+              },
+              "outputSchema": {
+                "type": "object",
+                "properties": {
+                  "reactions": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "description": "memos/{memo}/reactions/{reaction}"
+                        },
+                        "creator": {
+                          "type": "string",
+                          "description": "users/{user}"
+                        },
+                        "reactionType": {
+                          "type": "string"
+                        },
+                        "createTime": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "name",
+                        "creator",
+                        "reactionType",
+                        "createTime"
+                      ]
+                    }
+                  },
+                  "nextPageToken": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false,
+                "required": [
+                  "reactions",
+                  "nextPageToken"
+                ]
+              },
+              "authorization": [
+                "memos.read"
+              ],
+              "effect": "observation",
+              "authorizationContract": {
+                "required": true,
+                "scopes": [
+                  "memos.read"
+                ]
+              },
+              "authorizationVersion": 1,
+              "idempotency": "unsupported",
+              "concurrency": {
+                "mode": "parallel"
+              }
+            }
+          ]
+        }
+      ],
+      "events": [],
+      "transports": []
+    },
+    "capability": {
+      "contract": "org.appworks.contracts.memos",
+      "name": "memos.reactions.list",
+      "version": 1
+    },
+    "contractDigest": "sha256:e57d2b6964950a035583c4fa15944b392369fcd9e8e15f6165301bd5a43f810d",
+    "capabilityDigest": "sha256:8d67db5ca4f580fafd2fb32da567238bc64c41d55b9c13b36d5aab038cf82026",
+    "proposal": {
+      "name": "memo.reactions.list",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "parent": {
+            "type": "string"
+          },
+          "pageSize": {
+            "type": "integer"
+          },
+          "pageToken": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "parent"
+        ]
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "reactions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/memos.api.Reaction"
+            }
+          },
+          "nextPageToken": {
+            "type": "string"
+          }
+        },
+        "$defs": {
+          "memos.api.Reaction": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "creator": {
+                "type": "string"
+              },
+              "reactionType": {
+                "type": "string"
+              },
+              "createTime": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "reactionType"
+            ]
+          }
+        }
+      }
+    },
+    "mapping": {
+      "changes": [
+        {
+          "direction": "input",
+          "kind": "description.changed",
+          "target": "parent",
+          "reason": "The contract documents the resource-name format."
+        },
+        {
+          "direction": "input",
+          "kind": "input.bound-tightened",
+          "target": "pageSize",
+          "reason": "page_size is an int32 field: the bounds are the proto type's own range, which the assessment's JSON Schema mapping does not express. No value Memos accepts is refused. Memos currently ignores page_size and page_token and returns all reactions (memo_service.proto)."
+        },
+        {
+          "direction": "input",
+          "kind": "input.pattern-changed",
+          "target": "parent",
+          "reason": "The proto field is any string. The contract accepts memo resource names exactly as the bridge's existing memos.get does (memos/ and 1-64 letters, digits, '_' or '-'), a superset of the UIDs Memos creates at this revision (identifier.UIDMatcher, 1-36 letters, digits or '-'; generated shortuuid). Path-like and malformed names are refused before Memos is contacted, so the adapter can build GET /api/{parent}/reactions safely. Memos itself answers 404 for names it cannot resolve, so no name Memos would answer with reactions is refused."
+        },
+        {
+          "direction": "output",
+          "kind": "description.changed",
+          "target": "reactions[].creator",
+          "reason": "The contract documents the resource-name format, users/{user}."
+        },
+        {
+          "direction": "output",
+          "kind": "description.changed",
+          "target": "reactions[].name",
+          "reason": "The contract documents the resource-name format, memos/{memo}/reactions/{reaction}."
+        }
+      ],
+      "decisions": [
+        {
+          "subject": "authorization",
+          "decision": "scope memos.read, required",
+          "reason": "The bridge's own scope, granted to any caller presenting a Memos credential; Memos' checkMemoReadAccess decides each access with that credential."
+        },
+        {
+          "subject": "capability name",
+          "decision": "memos.reactions.list, not the assessment's memo.reactions.list",
+          "reason": "The existing Memos bridge names its capabilities in the memos namespace (memos.search, memos.get); the extracted capability joins them on the same boundary."
+        },
+        {
+          "subject": "input additionalProperties",
+          "decision": "false",
+          "reason": "Memos' gateway discards unknown fields (DiscardUnknown); the capability refuses them instead of silently ignoring them, as the bridge's existing capabilities do."
+        },
+        {
+          "subject": "output required members",
+          "decision": "reactions, nextPageToken and every Reaction field are required",
+          "reason": "Memos' gateway writes default values (EmitDefaultValues, server/api/api.go), and the adapter maps an absent repeated or string field to its proto3 default ([] or \"\"), so every member is always present; nothing is nullable."
+        }
+      ],
+      "fields": [
+        {
+          "direction": "input",
+          "contract": "/pageSize",
+          "source": "ListMemoReactionsRequest.page_size (query parameter pageSize)",
+          "rule": "identity"
+        },
+        {
+          "direction": "input",
+          "contract": "/pageToken",
+          "source": "ListMemoReactionsRequest.page_token (query parameter pageToken)",
+          "rule": "identity"
+        },
+        {
+          "direction": "input",
+          "contract": "/parent",
+          "source": "ListMemoReactionsRequest.parent (path parameter)",
+          "rule": "identity"
+        },
+        {
+          "direction": "output",
+          "contract": "/nextPageToken",
+          "source": "ListMemoReactionsResponse.next_page_token",
+          "rule": "default-if-absent"
+        },
+        {
+          "direction": "output",
+          "contract": "/reactions",
+          "source": "ListMemoReactionsResponse.reactions",
+          "rule": "default-if-absent"
+        },
+        {
+          "direction": "output",
+          "contract": "/reactions/*/createTime",
+          "source": "Reaction.create_time (RFC 3339)",
+          "rule": "identity"
+        },
+        {
+          "direction": "output",
+          "contract": "/reactions/*/creator",
+          "source": "Reaction.creator",
+          "rule": "identity"
+        },
+        {
+          "direction": "output",
+          "contract": "/reactions/*/name",
+          "source": "Reaction.name",
+          "rule": "identity"
+        },
+        {
+          "direction": "output",
+          "contract": "/reactions/*/reactionType",
+          "source": "Reaction.reaction_type",
+          "rule": "identity"
+        }
+      ]
+    }
+  },
+  "adapter": {
+    "name": "memos-reactions-adapter",
+    "version": "1.1.0",
+    "files": [
+      {
+        "path": "runtime/adapter.mjs",
+        "digest": "sha256:b048beb8becb747dc2b09901a51b143886fa43bc34bb5f2d21112430c8b832ad"
+      },
+      {
+        "path": "runtime/declaration.mjs",
+        "digest": "sha256:cd2cf926c6203205635be0a198ffe812288b41efa9bd5df8114d5f45da5a7e68"
+      },
+      {
+        "path": "runtime/fulfillment.json",
+        "digest": "sha256:21fba367f1f572610106afa58cce8d760aee74468f9f9fe71f29289be8d2a7c4"
+      },
+      {
+        "path": "runtime/host.mjs",
+        "digest": "sha256:a6b9762f8b10ce6dbe1ae359f65e3c49f8a28416515baac1a25a2d3232ea0f4a"
+      },
+      {
+        "path": "runtime/register.mjs",
+        "digest": "sha256:0ab1755743e08840c0203377f91349a6434cc9f6049836c5666d26dfd11fa821"
+      },
+      {
+        "path": "runtime/resolve-hooks.mjs",
+        "digest": "sha256:ca245810da6c48a7f9bb4dac0267301476216c6e919e2d237eb861df1e76c612"
+      }
+    ],
+    "packages": {
+      "@appport/protocol": "1.2.0",
+      "@appport/sdk": "1.2.2"
+    },
+    "boundary": {
+      "name": "memos-appport-bridge",
+      "description": "The Memos AppPort bridge (appport-bridge/) at the source revision, loaded unmodified: one AppPort server in trusted-boundary mode; authentication records the caller's Memos credential; permissionAuthorizer; capabilities call Memos' own HTTP API with that credential; startBridge publishes the host's manifest extensions and attributes (from rkendel1/memos e0ce856).",
+      "files": [
+        {
+          "path": "appport-bridge/bridge.mjs",
+          "digest": "sha256:3c3c163b8e52f457c81ed75382592af14a9672bee2656f71912a33a896bec6b9"
+        },
+        {
+          "path": "appport-bridge/lib/bridge-kit.mjs",
+          "digest": "sha256:0d0990952219a83db0663a359e1c71d2c450be900ff5513dc88cbcb49d35b2af"
+        },
+        {
+          "path": "appport-bridge/package-lock.json",
+          "digest": "sha256:4611c89feddc4602459ec905fdcae8a5fcfb5343e5a11afda485291cfd26893e"
+        }
+      ],
+      "invocation": {
+        "method": "GET",
+        "path": "/api/{parent}/reactions"
+      }
+    },
+    "digest": "sha256:c9bd858553cde748626687b668f48e8a01248425845d6990e0288310d4e4b86d"
+  },
+  "fulfillment": {
+    "provider": {
+      "application": "com.usememos.memos",
+      "capability": "memos.reactions.list",
+      "version": 1
+    },
+    "extensions": [
+      "appport.fulfillment/1"
+    ],
+    "attributes": {
+      "appport.fulfillment/1": {
+        "capabilities": {
+          "memos.reactions.list@1": [
+            {
+              "contract": "org.appworks.contracts.memos",
+              "capability": "memos.reactions.list",
+              "version": 1,
+              "digest": "sha256:8d67db5ca4f580fafd2fb32da567238bc64c41d55b9c13b36d5aab038cf82026"
+            }
+          ]
+        }
+      }
+    },
+    "digest": "sha256:9bcb802b0c60fc53064652737776a471dc708a0f8f5437a205d1547fbbff8c84"
+  },
+  "runtime": {
+    "packages": {
+      "@appport/protocol": "1.2.0",
+      "@appport/sdk": "1.2.2"
+    },
+    "application": {
+      "build": "go build -buildvcs=false -ldflags '-X github.com/usememos/memos/internal/version.Version=26.10.19-dev.e0ce856 -X github.com/usememos/memos/internal/version.Commit=e0ce8569589b2eccafd13e262ea3e320251858f2' ./cmd/memos, outside the checkout",
+      "data": "synthetic users (admin0, bob, carol) and memos created through Memos' own API by the bridge's test harness",
+      "storage": "sqlite, a fresh temporary data directory"
+    },
+    "node": ">=22.13"
+  },
+  "dependencies": {
+    "packages": {
+      "@appport/protocol": "1.2.0",
+      "@appport/sdk": "1.2.2"
+    },
+    "application": [
+      "database/sql",
+      "errors",
+      "fmt",
+      "github.com/google/cel-go/cel",
+      "github.com/google/cel-go/ext",
+      "github.com/pkg/errors",
+      "github.com/usememos/memos/proto/gen/store",
+      "google.golang.org/grpc/status",
+      "google.golang.org/protobuf/proto",
+      "google.golang.org/protobuf/types/known/timestamppb",
+      "log/slog",
+      "strconv",
+      "strings",
+      "time"
+    ],
+    "environment": [
+      "A Memos server built from the source revision, reachable from the bridge at APPPORT_BRIDGE_UPSTREAM.",
+      "The Memos bridge at the source revision (MEMOS_REPO), whose startBridge publishes manifest extensions and attributes (rkendel1/memos e0ce856 and later), hosted with runtime/register.mjs and runtime/host.mjs on Node 22.13 or later.",
+      "@appport/sdk 1.2.2, the version the bridge's package-lock.json pins, with its exact @appport/* dependencies; @appport/protocol 1.2.0 for the fulfillment declaration (claimFor, fulfillmentAttributes) and its checks.",
+      "Callers present their own Memos personal access token as `authorization: Bearer <token>`; put TLS in front of the bridge beyond localhost."
+    ]
+  },
+  "authorization": {
+    "requirements": [
+      "AppPort: the caller presents an application credential (the bridge's authenticate) and holds scope memos.read, which the bridge grants to every credential-bearing caller; anonymous calls are refused by AppPort before Memos is contacted.",
+      "Memos: the credential is a valid Memos access token (Memos answers 401 otherwise).",
+      "Memos: the caller may read the parent memo (checkMemoReadAccess): its creator, any signed-in user for PROTECTED, anyone for PUBLIC; Memos answers 403 (permission denied) or 404 otherwise."
+    ],
+    "restrictions": [
+      "Memos lists ListMemoReactions in PublicMethods; through AppPort a credential is always required, so anonymous reads Memos might allow on an instance with public access are not offered. This narrows access and never widens it.",
+      "The bridge holds no credential and stores nothing; every result is what Memos returned to the caller's own credential.",
+      "Memos' instance-administrator access (admins may read any memo) applies unchanged through the capability."
+    ],
+    "evidence": [
+      "ev-27cad4c955dca46d",
+      "ev-98efea7d6ce36d82",
+      "ev-ea1f6a0c4b4d7950"
+    ]
+  },
+  "sideEffects": {
+    "effect": "observation",
+    "persistence": [
+      {
+        "operation": "read",
+        "statement": "SELECT",
+        "evidence": [
+          "ev-23745960b46a3de4"
+        ]
+      },
+      {
+        "operation": "read",
+        "statement": "SELECT",
+        "evidence": [
+          "ev-42fc18154a2a558e"
+        ]
+      },
+      {
+        "operation": "read",
+        "statement": "SELECT",
+        "evidence": [
+          "ev-6ac181b109ead7df"
+        ]
+      },
+      {
+        "operation": "read",
+        "statement": "SELECT",
+        "evidence": [
+          "ev-81766aade8cf1dc9"
+        ]
+      },
+      {
+        "operation": "read",
+        "statement": "SELECT",
+        "evidence": [
+          "ev-8636ad7171716cae"
+        ]
+      },
+      {
+        "operation": "read",
+        "statement": "SELECT",
+        "evidence": [
+          "ev-ba558bd0ae8547f4"
+        ]
+      },
+      {
+        "operation": "read",
+        "statement": "SELECT",
+        "evidence": [
+          "ev-bacda947da368697"
+        ]
+      },
+      {
+        "operation": "read",
+        "statement": "SELECT",
+        "evidence": [
+          "ev-c5f9f515f46dd119"
+        ]
+      },
+      {
+        "operation": "read",
+        "statement": "SELECT",
+        "evidence": [
+          "ev-df8ebe32d9af75a2"
+        ]
+      },
+      {
+        "operation": "read",
+        "statement": "SELECT",
+        "evidence": [
+          "ev-e9604aec3f6ad745"
+        ]
+      },
+      {
+        "operation": "read",
+        "statement": "SELECT",
+        "evidence": [
+          "ev-f7b0e36543b2b470"
+        ]
+      },
+      {
+        "operation": "read",
+        "statement": "SELECT",
+        "evidence": [
+          "ev-f7f928461399276d"
+        ]
+      }
+    ],
+    "evidence": [
+      "ev-23745960b46a3de4",
+      "ev-42fc18154a2a558e",
+      "ev-6ac181b109ead7df",
+      "ev-81766aade8cf1dc9",
+      "ev-8636ad7171716cae",
+      "ev-ba558bd0ae8547f4",
+      "ev-bacda947da368697",
+      "ev-c5f9f515f46dd119",
+      "ev-df8ebe32d9af75a2",
+      "ev-e9604aec3f6ad745",
+      "ev-f7b0e36543b2b470",
+      "ev-f7f928461399276d"
+    ]
+  },
+  "verification": {
+    "required": [
+      "authorization.claim-not-authority",
+      "authorization.discovery-not-authority",
+      "authorization.no-bypass",
+      "authorization.permitted-results",
+      "authorization.resource-restriction",
+      "authorization.unauthenticated-denied",
+      "contract.empty-and-multiple",
+      "contract.interface-conformance",
+      "contract.invalid-input",
+      "contract.no-field-omitted",
+      "contract.no-sensitive-data",
+      "contract.optional-fields",
+      "contract.output-shape",
+      "errors.deliberate-mapping",
+      "errors.denial-distinguishable",
+      "errors.failure-not-success",
+      "integration.declaration-fails-closed",
+      "integration.discoverable",
+      "integration.fulfillment-claim",
+      "integration.real-operation",
+      "integration.source-revision"
+    ],
+    "records": [
+      {
+        "behavior": "authorization.claim-not-authority",
+        "category": "authorization",
+        "description": "A published fulfillment claim confers no authority: callers without a valid credential, or denied by the application, stay denied.",
+        "subject": {
+          "sourceRevision": "e0ce8569589b2eccafd13e262ea3e320251858f2",
+          "capabilityDigest": "sha256:8d67db5ca4f580fafd2fb32da567238bc64c41d55b9c13b36d5aab038cf82026",
+          "adapterDigest": "sha256:c9bd858553cde748626687b668f48e8a01248425845d6990e0288310d4e4b86d",
+          "declarationDigest": "sha256:9bcb802b0c60fc53064652737776a471dc708a0f8f5437a205d1547fbbff8c84",
+          "runtimeDigest": "sha256:217ba8f9e6320ba85981fa2d9e3e4436f045937fe5ae431ece5479d01736bdd1"
+        },
+        "status": "passed",
+        "against": "real-application",
+        "procedure": {
+          "kind": "integration-test",
+          "reference": "extractions/memos-reactions/test/behavior.test.mjs"
+        },
+        "results": [
+          "passed [real-application]: with the claim published and valid, callers without authority stay denied"
+        ],
+        "limitations": []
+      },
+      {
+        "behavior": "authorization.discovery-not-authority",
+        "category": "authorization",
+        "description": "Discovering the capability confers no authority to invoke it.",
+        "subject": {
+          "sourceRevision": "e0ce8569589b2eccafd13e262ea3e320251858f2",
+          "capabilityDigest": "sha256:8d67db5ca4f580fafd2fb32da567238bc64c41d55b9c13b36d5aab038cf82026",
+          "adapterDigest": "sha256:c9bd858553cde748626687b668f48e8a01248425845d6990e0288310d4e4b86d",
+          "declarationDigest": "sha256:9bcb802b0c60fc53064652737776a471dc708a0f8f5437a205d1547fbbff8c84",
+          "runtimeDigest": "sha256:217ba8f9e6320ba85981fa2d9e3e4436f045937fe5ae431ece5479d01736bdd1"
+        },
+        "status": "passed",
+        "against": "real-application",
+        "procedure": {
+          "kind": "integration-test",
+          "reference": "extractions/memos-reactions/test/behavior.test.mjs"
+        },
+        "results": [
+          "passed [real-application]: discovering the capability grants nothing: invoking it still needs the caller's credential"
+        ],
+        "limitations": []
+      },
+      {
+        "behavior": "authorization.no-bypass",
+        "category": "authorization",
+        "description": "The adapter holds no credential, reads no database and calls only the application's own boundary with the caller's credential.",
+        "subject": {
+          "sourceRevision": "e0ce8569589b2eccafd13e262ea3e320251858f2",
+          "capabilityDigest": "sha256:8d67db5ca4f580fafd2fb32da567238bc64c41d55b9c13b36d5aab038cf82026",
+          "adapterDigest": "sha256:c9bd858553cde748626687b668f48e8a01248425845d6990e0288310d4e4b86d",
+          "declarationDigest": "sha256:9bcb802b0c60fc53064652737776a471dc708a0f8f5437a205d1547fbbff8c84",
+          "runtimeDigest": "sha256:217ba8f9e6320ba85981fa2d9e3e4436f045937fe5ae431ece5479d01736bdd1"
+        },
+        "status": "passed",
+        "against": "real-application",
+        "procedure": {
+          "kind": "integration-test",
+          "reference": "extractions/memos-reactions/test/behavior.test.mjs"
+        },
+        "results": [
+          "passed [none]: the adapter holds no credential, reads no database and calls only Memos' own API",
+          "passed [real-application]: the caller's own credential decides, call by call: bob, carol and bob again",
+          "passed [real-application]: the host adds exactly one capability and its declaration to the unmodified bridge"
+        ],
+        "limitations": []
+      },
+      {
+        "behavior": "authorization.permitted-results",
+        "category": "authorization",
+        "description": "An authorized caller receives exactly what the source operation returns to that caller, and no more.",
+        "subject": {
+          "sourceRevision": "e0ce8569589b2eccafd13e262ea3e320251858f2",
+          "capabilityDigest": "sha256:8d67db5ca4f580fafd2fb32da567238bc64c41d55b9c13b36d5aab038cf82026",
+          "adapterDigest": "sha256:c9bd858553cde748626687b668f48e8a01248425845d6990e0288310d4e4b86d",
+          "declarationDigest": "sha256:9bcb802b0c60fc53064652737776a471dc708a0f8f5437a205d1547fbbff8c84",
+          "runtimeDigest": "sha256:217ba8f9e6320ba85981fa2d9e3e4436f045937fe5ae431ece5479d01736bdd1"
+        },
+        "status": "passed",
+        "against": "real-application",
+        "procedure": {
+          "kind": "integration-test",
+          "reference": "extractions/memos-reactions/test/behavior.test.mjs"
+        },
+        "results": [
+          "passed [real-application]: for every caller and memo, the capability answers exactly as the original operation",
+          "passed [real-application]: the caller's own credential decides, call by call: bob, carol and bob again"
+        ],
+        "limitations": []
+      },
+      {
+        "behavior": "authorization.resource-restriction",
+        "category": "authorization",
+        "description": "Resource-specific restrictions of the source operation remain effective: a caller denied by the application is denied through the capability.",
+        "subject": {
+          "sourceRevision": "e0ce8569589b2eccafd13e262ea3e320251858f2",
+          "capabilityDigest": "sha256:8d67db5ca4f580fafd2fb32da567238bc64c41d55b9c13b36d5aab038cf82026",
+          "adapterDigest": "sha256:c9bd858553cde748626687b668f48e8a01248425845d6990e0288310d4e4b86d",
+          "declarationDigest": "sha256:9bcb802b0c60fc53064652737776a471dc708a0f8f5437a205d1547fbbff8c84",
+          "runtimeDigest": "sha256:217ba8f9e6320ba85981fa2d9e3e4436f045937fe5ae431ece5479d01736bdd1"
+        },
+        "status": "passed",
+        "against": "real-application",
+        "procedure": {
+          "kind": "integration-test",
+          "reference": "extractions/memos-reactions/test/behavior.test.mjs"
+        },
+        "results": [
+          "passed [real-application]: carol is denied bob's private memo, which exists and has reactions; admins and PROTECTED readers are not"
+        ],
+        "limitations": []
+      },
+      {
+        "behavior": "authorization.unauthenticated-denied",
+        "category": "authorization",
+        "description": "A caller without a valid credential is denied.",
+        "subject": {
+          "sourceRevision": "e0ce8569589b2eccafd13e262ea3e320251858f2",
+          "capabilityDigest": "sha256:8d67db5ca4f580fafd2fb32da567238bc64c41d55b9c13b36d5aab038cf82026",
+          "adapterDigest": "sha256:c9bd858553cde748626687b668f48e8a01248425845d6990e0288310d4e4b86d",
+          "declarationDigest": "sha256:9bcb802b0c60fc53064652737776a471dc708a0f8f5437a205d1547fbbff8c84",
+          "runtimeDigest": "sha256:217ba8f9e6320ba85981fa2d9e3e4436f045937fe5ae431ece5479d01736bdd1"
+        },
+        "status": "passed",
+        "against": "real-application",
+        "procedure": {
+          "kind": "integration-test",
+          "reference": "extractions/memos-reactions/test/behavior.test.mjs"
+        },
+        "results": [
+          "passed [real-application]: no credential and an invalid credential are denied, as by the original operation"
+        ],
+        "limitations": []
+      },
+      {
+        "behavior": "contract.empty-and-multiple",
+        "category": "contract",
+        "description": "Empty and multi-element results are returned as such, in the source operation's order.",
+        "subject": {
+          "sourceRevision": "e0ce8569589b2eccafd13e262ea3e320251858f2",
+          "capabilityDigest": "sha256:8d67db5ca4f580fafd2fb32da567238bc64c41d55b9c13b36d5aab038cf82026",
+          "adapterDigest": "sha256:c9bd858553cde748626687b668f48e8a01248425845d6990e0288310d4e4b86d",
+          "declarationDigest": "sha256:9bcb802b0c60fc53064652737776a471dc708a0f8f5437a205d1547fbbff8c84",
+          "runtimeDigest": "sha256:217ba8f9e6320ba85981fa2d9e3e4436f045937fe5ae431ece5479d01736bdd1"
+        },
+        "status": "passed",
+        "against": "real-application",
+        "procedure": {
+          "kind": "integration-test",
+          "reference": "extractions/memos-reactions/test/behavior.test.mjs"
+        },
+        "results": [
+          "passed [real-application]: zero, one and several reactions, in Memos' order"
+        ],
+        "limitations": []
+      },
+      {
+        "behavior": "contract.interface-conformance",
+        "category": "contract",
+        "description": "The capability the boundary advertises has exactly the contract's schemas, kind and effect (AppPort compareSchemas, both directions).",
+        "subject": {
+          "sourceRevision": "e0ce8569589b2eccafd13e262ea3e320251858f2",
+          "capabilityDigest": "sha256:8d67db5ca4f580fafd2fb32da567238bc64c41d55b9c13b36d5aab038cf82026",
+          "adapterDigest": "sha256:c9bd858553cde748626687b668f48e8a01248425845d6990e0288310d4e4b86d",
+          "declarationDigest": "sha256:9bcb802b0c60fc53064652737776a471dc708a0f8f5437a205d1547fbbff8c84",
+          "runtimeDigest": "sha256:217ba8f9e6320ba85981fa2d9e3e4436f045937fe5ae431ece5479d01736bdd1"
+        },
+        "status": "passed",
+        "against": "real-application",
+        "procedure": {
+          "kind": "protocol-check",
+          "reference": "extractions/memos-reactions/test/behavior.test.mjs"
+        },
+        "results": [
+          "passed [real-application]: the advertised capability is exactly the contract (compareSchemas both directions)"
+        ],
+        "limitations": []
+      },
+      {
+        "behavior": "contract.invalid-input",
+        "category": "contract",
+        "description": "Invalid input is rejected, by the contract or by the source operation, and never answered as success.",
+        "subject": {
+          "sourceRevision": "e0ce8569589b2eccafd13e262ea3e320251858f2",
+          "capabilityDigest": "sha256:8d67db5ca4f580fafd2fb32da567238bc64c41d55b9c13b36d5aab038cf82026",
+          "adapterDigest": "sha256:c9bd858553cde748626687b668f48e8a01248425845d6990e0288310d4e4b86d",
+          "declarationDigest": "sha256:9bcb802b0c60fc53064652737776a471dc708a0f8f5437a205d1547fbbff8c84",
+          "runtimeDigest": "sha256:217ba8f9e6320ba85981fa2d9e3e4436f045937fe5ae431ece5479d01736bdd1"
+        },
+        "status": "passed",
+        "against": "real-application",
+        "procedure": {
+          "kind": "integration-test",
+          "reference": "extractions/memos-reactions/test/behavior.test.mjs"
+        },
+        "results": [
+          "passed [real-application]: invalid input is refused by the contract; names Memos cannot resolve are NOT_FOUND, as in the original"
+        ],
+        "limitations": []
+      },
+      {
+        "behavior": "contract.no-field-omitted",
+        "category": "contract",
+        "description": "Every field of the source operation's answer appears in the capability output.",
+        "subject": {
+          "sourceRevision": "e0ce8569589b2eccafd13e262ea3e320251858f2",
+          "capabilityDigest": "sha256:8d67db5ca4f580fafd2fb32da567238bc64c41d55b9c13b36d5aab038cf82026",
+          "adapterDigest": "sha256:c9bd858553cde748626687b668f48e8a01248425845d6990e0288310d4e4b86d",
+          "declarationDigest": "sha256:9bcb802b0c60fc53064652737776a471dc708a0f8f5437a205d1547fbbff8c84",
+          "runtimeDigest": "sha256:217ba8f9e6320ba85981fa2d9e3e4436f045937fe5ae431ece5479d01736bdd1"
+        },
+        "status": "passed",
+        "against": "real-application",
+        "procedure": {
+          "kind": "integration-test",
+          "reference": "extractions/memos-reactions/test/behavior.test.mjs"
+        },
+        "results": [
+          "passed [real-application]: every field of the original answer appears in the capability output"
+        ],
+        "limitations": []
+      },
+      {
+        "behavior": "contract.no-sensitive-data",
+        "category": "contract",
+        "description": "Outputs carry only the contracted fields: no credential, secret or unrelated personal data, and no echo of the caller's credential.",
+        "subject": {
+          "sourceRevision": "e0ce8569589b2eccafd13e262ea3e320251858f2",
+          "capabilityDigest": "sha256:8d67db5ca4f580fafd2fb32da567238bc64c41d55b9c13b36d5aab038cf82026",
+          "adapterDigest": "sha256:c9bd858553cde748626687b668f48e8a01248425845d6990e0288310d4e4b86d",
+          "declarationDigest": "sha256:9bcb802b0c60fc53064652737776a471dc708a0f8f5437a205d1547fbbff8c84",
+          "runtimeDigest": "sha256:217ba8f9e6320ba85981fa2d9e3e4436f045937fe5ae431ece5479d01736bdd1"
+        },
+        "status": "passed",
+        "against": "real-application",
+        "procedure": {
+          "kind": "integration-test",
+          "reference": "extractions/memos-reactions/test/behavior.test.mjs"
+        },
+        "results": [
+          "passed [real-application]: outputs carry only contracted fields: no credential, secret or unrelated personal data"
+        ],
+        "limitations": []
+      },
+      {
+        "behavior": "contract.optional-fields",
+        "category": "contract",
+        "description": "Missing and optional fields keep the source operation's semantics; absent proto3 fields map to their defaults, nothing becomes null.",
+        "subject": {
+          "sourceRevision": "e0ce8569589b2eccafd13e262ea3e320251858f2",
+          "capabilityDigest": "sha256:8d67db5ca4f580fafd2fb32da567238bc64c41d55b9c13b36d5aab038cf82026",
+          "adapterDigest": "sha256:c9bd858553cde748626687b668f48e8a01248425845d6990e0288310d4e4b86d",
+          "declarationDigest": "sha256:9bcb802b0c60fc53064652737776a471dc708a0f8f5437a205d1547fbbff8c84",
+          "runtimeDigest": "sha256:217ba8f9e6320ba85981fa2d9e3e4436f045937fe5ae431ece5479d01736bdd1"
+        },
+        "status": "passed",
+        "against": "real-application",
+        "procedure": {
+          "kind": "integration-test",
+          "reference": "extractions/memos-reactions/test/behavior.test.mjs"
+        },
+        "results": [
+          "passed [none]: the output mapping applies proto3 defaults and refuses every other deviation",
+          "passed [real-application]: optional page fields pass through with Memos' semantics, and nothing is null"
+        ],
+        "limitations": []
+      },
+      {
+        "behavior": "contract.output-shape",
+        "category": "contract",
+        "description": "Valid input produces output of the contracted shape, equal to the source operation's answer.",
+        "subject": {
+          "sourceRevision": "e0ce8569589b2eccafd13e262ea3e320251858f2",
+          "capabilityDigest": "sha256:8d67db5ca4f580fafd2fb32da567238bc64c41d55b9c13b36d5aab038cf82026",
+          "adapterDigest": "sha256:c9bd858553cde748626687b668f48e8a01248425845d6990e0288310d4e4b86d",
+          "declarationDigest": "sha256:9bcb802b0c60fc53064652737776a471dc708a0f8f5437a205d1547fbbff8c84",
+          "runtimeDigest": "sha256:217ba8f9e6320ba85981fa2d9e3e4436f045937fe5ae431ece5479d01736bdd1"
+        },
+        "status": "passed",
+        "against": "real-application",
+        "procedure": {
+          "kind": "integration-test",
+          "reference": "extractions/memos-reactions/test/behavior.test.mjs"
+        },
+        "results": [
+          "passed [real-application]: for every caller and memo, the capability answers exactly as the original operation"
+        ],
+        "limitations": []
+      },
+      {
+        "behavior": "errors.deliberate-mapping",
+        "category": "error",
+        "description": "Application errors map to deliberate AppPort errors (not found, invalid input, internal).",
+        "subject": {
+          "sourceRevision": "e0ce8569589b2eccafd13e262ea3e320251858f2",
+          "capabilityDigest": "sha256:8d67db5ca4f580fafd2fb32da567238bc64c41d55b9c13b36d5aab038cf82026",
+          "adapterDigest": "sha256:c9bd858553cde748626687b668f48e8a01248425845d6990e0288310d4e4b86d",
+          "declarationDigest": "sha256:9bcb802b0c60fc53064652737776a471dc708a0f8f5437a205d1547fbbff8c84",
+          "runtimeDigest": "sha256:217ba8f9e6320ba85981fa2d9e3e4436f045937fe5ae431ece5479d01736bdd1"
+        },
+        "status": "passed",
+        "against": "real-application",
+        "procedure": {
+          "kind": "integration-test",
+          "reference": "extractions/memos-reactions/test/behavior.test.mjs"
+        },
+        "results": [
+          "passed [real-application]: invalid input is refused by the contract; names Memos cannot resolve are NOT_FOUND, as in the original",
+          "passed [stub-application]: a failing, unreachable or malformed application is an error, never a success (stub application)"
+        ],
+        "limitations": []
+      },
+      {
+        "behavior": "errors.denial-distinguishable",
+        "category": "error",
+        "description": "Authorization denials remain distinguishable from unrelated failures where the source interface distinguishes them.",
+        "subject": {
+          "sourceRevision": "e0ce8569589b2eccafd13e262ea3e320251858f2",
+          "capabilityDigest": "sha256:8d67db5ca4f580fafd2fb32da567238bc64c41d55b9c13b36d5aab038cf82026",
+          "adapterDigest": "sha256:c9bd858553cde748626687b668f48e8a01248425845d6990e0288310d4e4b86d",
+          "declarationDigest": "sha256:9bcb802b0c60fc53064652737776a471dc708a0f8f5437a205d1547fbbff8c84",
+          "runtimeDigest": "sha256:217ba8f9e6320ba85981fa2d9e3e4436f045937fe5ae431ece5479d01736bdd1"
+        },
+        "status": "passed",
+        "against": "real-application",
+        "procedure": {
+          "kind": "integration-test",
+          "reference": "extractions/memos-reactions/test/behavior.test.mjs"
+        },
+        "results": [
+          "passed [real-application]: carol is denied bob's private memo, which exists and has reactions; admins and PROTECTED readers are not",
+          "passed [real-application]: for every caller and memo, the capability answers exactly as the original operation",
+          "passed [real-application]: no credential and an invalid credential are denied, as by the original operation"
+        ],
+        "limitations": []
+      },
+      {
+        "behavior": "errors.failure-not-success",
+        "category": "error",
+        "description": "An application failure, an unreachable application or an unexpected answer is an error, never a fabricated success.",
+        "subject": {
+          "sourceRevision": "e0ce8569589b2eccafd13e262ea3e320251858f2",
+          "capabilityDigest": "sha256:8d67db5ca4f580fafd2fb32da567238bc64c41d55b9c13b36d5aab038cf82026",
+          "adapterDigest": "sha256:c9bd858553cde748626687b668f48e8a01248425845d6990e0288310d4e4b86d",
+          "declarationDigest": "sha256:9bcb802b0c60fc53064652737776a471dc708a0f8f5437a205d1547fbbff8c84",
+          "runtimeDigest": "sha256:217ba8f9e6320ba85981fa2d9e3e4436f045937fe5ae431ece5479d01736bdd1"
+        },
+        "status": "passed",
+        "against": "real-application",
+        "procedure": {
+          "kind": "integration-test",
+          "reference": "extractions/memos-reactions/test/behavior.test.mjs"
+        },
+        "results": [
+          "passed [none]: the output mapping applies proto3 defaults and refuses every other deviation",
+          "passed [real-application]: a failed invocation is not reported as a fulfilled result: Memos stopped, the claim still published",
+          "passed [stub-application]: a failing, unreachable or malformed application is an error, never a success (stub application)"
+        ],
+        "limitations": []
+      },
+      {
+        "behavior": "integration.declaration-fails-closed",
+        "category": "integration",
+        "description": "A missing, malformed, mismatched, stale or unpublished fulfillment declaration is refused with a reason code; nothing falls back to an undeclared or permissive capability.",
+        "subject": {
+          "sourceRevision": "e0ce8569589b2eccafd13e262ea3e320251858f2",
+          "capabilityDigest": "sha256:8d67db5ca4f580fafd2fb32da567238bc64c41d55b9c13b36d5aab038cf82026",
+          "adapterDigest": "sha256:c9bd858553cde748626687b668f48e8a01248425845d6990e0288310d4e4b86d",
+          "declarationDigest": "sha256:9bcb802b0c60fc53064652737776a471dc708a0f8f5437a205d1547fbbff8c84",
+          "runtimeDigest": "sha256:217ba8f9e6320ba85981fa2d9e3e4436f045937fe5ae431ece5479d01736bdd1"
+        },
+        "status": "passed",
+        "against": "real-application",
+        "procedure": {
+          "kind": "integration-test",
+          "reference": "extractions/memos-reactions/test/behavior.test.mjs"
+        },
+        "results": [
+          "passed [none]: a changed contract makes the published claim stale: declaration evidence is not reused for another contract",
+          "passed [real-application]: a bridge that does not publish the declaration is refused (FULFILLMENT_UNPUBLISHED), and its manifest is claim.undeclared",
+          "passed [real-application]: missing, malformed, mismatched and stale declarations stop the host with a reason code"
+        ],
+        "limitations": []
+      },
+      {
+        "behavior": "integration.discoverable",
+        "category": "integration",
+        "description": "The capability is discoverable through the application's actual AppPort boundary.",
+        "subject": {
+          "sourceRevision": "e0ce8569589b2eccafd13e262ea3e320251858f2",
+          "capabilityDigest": "sha256:8d67db5ca4f580fafd2fb32da567238bc64c41d55b9c13b36d5aab038cf82026",
+          "adapterDigest": "sha256:c9bd858553cde748626687b668f48e8a01248425845d6990e0288310d4e4b86d",
+          "declarationDigest": "sha256:9bcb802b0c60fc53064652737776a471dc708a0f8f5437a205d1547fbbff8c84",
+          "runtimeDigest": "sha256:217ba8f9e6320ba85981fa2d9e3e4436f045937fe5ae431ece5479d01736bdd1"
+        },
+        "status": "passed",
+        "against": "real-application",
+        "procedure": {
+          "kind": "integration-test",
+          "reference": "extractions/memos-reactions/test/behavior.test.mjs"
+        },
+        "results": [
+          "passed [real-application]: the capability is discoverable through the bridge, beside the bridge's own",
+          "passed [real-application]: the host adds exactly one capability and its declaration to the unmodified bridge"
+        ],
+        "limitations": []
+      },
+      {
+        "behavior": "integration.fulfillment-claim",
+        "category": "integration",
+        "description": "The boundary publishes the extraction's fulfillment declaration in its manifest, AppPort client discovery returns it, and AppPort's evaluateFulfillment finds the claim valid against the contract.",
+        "subject": {
+          "sourceRevision": "e0ce8569589b2eccafd13e262ea3e320251858f2",
+          "capabilityDigest": "sha256:8d67db5ca4f580fafd2fb32da567238bc64c41d55b9c13b36d5aab038cf82026",
+          "adapterDigest": "sha256:c9bd858553cde748626687b668f48e8a01248425845d6990e0288310d4e4b86d",
+          "declarationDigest": "sha256:9bcb802b0c60fc53064652737776a471dc708a0f8f5437a205d1547fbbff8c84",
+          "runtimeDigest": "sha256:217ba8f9e6320ba85981fa2d9e3e4436f045937fe5ae431ece5479d01736bdd1"
+        },
+        "status": "passed",
+        "against": "real-application",
+        "procedure": {
+          "kind": "integration-test",
+          "reference": "extractions/memos-reactions/test/behavior.test.mjs"
+        },
+        "results": [
+          "passed [real-application]: AppPort client discovery returns the published declaration, and evaluateFulfillment finds the claim valid"
+        ],
+        "limitations": []
+      },
+      {
+        "behavior": "integration.real-operation",
+        "category": "integration",
+        "description": "Invocation reaches the real source operation, confirmed independently of the adapter's answer.",
+        "subject": {
+          "sourceRevision": "e0ce8569589b2eccafd13e262ea3e320251858f2",
+          "capabilityDigest": "sha256:8d67db5ca4f580fafd2fb32da567238bc64c41d55b9c13b36d5aab038cf82026",
+          "adapterDigest": "sha256:c9bd858553cde748626687b668f48e8a01248425845d6990e0288310d4e4b86d",
+          "declarationDigest": "sha256:9bcb802b0c60fc53064652737776a471dc708a0f8f5437a205d1547fbbff8c84",
+          "runtimeDigest": "sha256:217ba8f9e6320ba85981fa2d9e3e4436f045937fe5ae431ece5479d01736bdd1"
+        },
+        "status": "passed",
+        "against": "real-application",
+        "procedure": {
+          "kind": "integration-test",
+          "reference": "extractions/memos-reactions/test/behavior.test.mjs"
+        },
+        "results": [
+          "passed [none]: the adapter holds no credential, reads no database and calls only Memos' own API",
+          "passed [real-application]: for every caller and memo, the capability answers exactly as the original operation"
+        ],
+        "limitations": []
+      },
+      {
+        "behavior": "integration.source-revision",
+        "category": "integration",
+        "description": "The application tested is the recorded source revision, unchanged by the test run.",
+        "subject": {
+          "sourceRevision": "e0ce8569589b2eccafd13e262ea3e320251858f2",
+          "capabilityDigest": "sha256:8d67db5ca4f580fafd2fb32da567238bc64c41d55b9c13b36d5aab038cf82026",
+          "adapterDigest": "sha256:c9bd858553cde748626687b668f48e8a01248425845d6990e0288310d4e4b86d",
+          "declarationDigest": "sha256:9bcb802b0c60fc53064652737776a471dc708a0f8f5437a205d1547fbbff8c84",
+          "runtimeDigest": "sha256:217ba8f9e6320ba85981fa2d9e3e4436f045937fe5ae431ece5479d01736bdd1"
+        },
+        "status": "passed",
+        "against": "real-application",
+        "procedure": {
+          "kind": "integration-test",
+          "reference": "extractions/memos-reactions/test/behavior.test.mjs"
+        },
+        "results": [
+          "passed [real-application]: the checkout is the pinned source revision",
+          "passed [real-application]: the checkout is unchanged by the run"
+        ],
+        "limitations": []
+      }
+    ],
+    "summary": {
+      "not-run": 0,
+      "passed": 21,
+      "failed": 0,
+      "inconclusive": 0
+    }
+  },
+  "evidence": [
+    {
+      "id": "ev-151cfc96de77eea1",
+      "class": "observed",
+      "kind": "go.call",
+      "location": {
+        "path": "server/api/test/memo_service_test.go",
+        "startLine": 256,
+        "endLine": 256
+      },
+      "subject": "ListMemoReactions",
+      "observation": "TestMemoReadFailsClosedForMissingCreatorBeforePaginationAndChildren calls ts.Service.ListMemoReactions(…)",
+      "method": "go-static"
+    },
+    {
+      "id": "ev-162b62b11e5b3c85",
+      "class": "observed",
+      "kind": "proto.rpc",
+      "location": {
+        "path": "proto/api/memo_service.proto",
+        "startLine": 121,
+        "endLine": 124
+      },
+      "subject": "ListMemoReactions",
+      "observation": "service memos.api.MemoService declares rpc ListMemoReactions(ListMemoReactionsRequest) returns (ListMemoReactionsResponse)",
+      "method": "proto-static"
+    },
+    {
+      "id": "ev-23745960b46a3de4",
+      "class": "observed",
+      "kind": "sql.statement",
+      "location": {
+        "path": "store/db/sqlite/memo.go",
+        "startLine": 222,
+        "endLine": 222
+      },
+      "subject": "SELECT",
+      "observation": "DB.ListMemos contains a SQL SELECT statement literal",
+      "method": "go-static"
+    },
+    {
+      "id": "ev-27cad4c955dca46d",
+      "class": "observed",
+      "kind": "go.status-code",
+      "location": {
+        "path": "server/api/memo_access.go",
+        "startLine": 60,
+        "endLine": 60
+      },
+      "subject": "PermissionDenied",
+      "observation": "memoAccessDecisionError uses google.golang.org/grpc/codes PermissionDenied, an authentication or authorization failure code",
+      "method": "go-static"
+    },
+    {
+      "id": "ev-30a69cfa46e14127",
+      "class": "inferred",
+      "kind": "link.test",
+      "subject": "TestMemoReadFailsClosedForMissingCreatorBeforePaginationAndChildren",
+      "observation": "TestMemoReadFailsClosedForMissingCreatorBeforePaginationAndChildren exercises rpc ListMemoReactions: it calls a method of that name and constructs ListMemoReactionsRequest",
+      "method": "derivation",
+      "basis": [
+        "ev-da9d3a95b5188712",
+        "ev-151cfc96de77eea1"
+      ]
+    },
+    {
+      "id": "ev-42fc18154a2a558e",
+      "class": "observed",
+      "kind": "sql.statement",
+      "location": {
+        "path": "store/db/postgres/memo.go",
+        "startLine": 217,
+        "endLine": 217
+      },
+      "subject": "SELECT",
+      "observation": "DB.ListMemos contains a SQL SELECT statement literal",
+      "method": "go-static"
+    },
+    {
+      "id": "ev-4559c73ec1c31a44",
+      "class": "observed",
+      "kind": "go.test-function",
+      "location": {
+        "path": "server/api/test/reaction_service_test.go",
+        "startLine": 471,
+        "endLine": 507
+      },
+      "subject": "TestListMemoReactionsSkipsMissingCreators",
+      "observation": "test function TestListMemoReactionsSkipsMissingCreators is declared",
+      "method": "go-static"
+    },
+    {
+      "id": "ev-4626a808837157d5",
+      "class": "observed",
+      "kind": "go.call",
+      "location": {
+        "path": "server/api/test/memo_move_test.go",
+        "startLine": 109,
+        "endLine": 109
+      },
+      "subject": "ListMemoReactions",
+      "observation": "TestMoveMemoPreservesIndependentConversation calls ts.Service.ListMemoReactions(…)",
+      "method": "go-static"
+    },
+    {
+      "id": "ev-648ad0b6cd340132",
+      "class": "inferred",
+      "kind": "link.test",
+      "subject": "TestMoveMemoPreservesIndependentConversation",
+      "observation": "TestMoveMemoPreservesIndependentConversation exercises rpc ListMemoReactions: it calls a method of that name and constructs ListMemoReactionsRequest",
+      "method": "derivation",
+      "basis": [
+        "ev-aa52d57d92127759",
+        "ev-4626a808837157d5"
+      ]
+    },
+    {
+      "id": "ev-6ac181b109ead7df",
+      "class": "observed",
+      "kind": "sql.statement",
+      "location": {
+        "path": "store/db/mysql/reaction.go",
+        "startLine": 82,
+        "endLine": 90
+      },
+      "subject": "SELECT",
+      "observation": "DB.ListReactions contains a SQL SELECT statement literal",
+      "method": "go-static"
+    },
+    {
+      "id": "ev-81766aade8cf1dc9",
+      "class": "observed",
+      "kind": "sql.statement",
+      "location": {
+        "path": "store/db/postgres/instance_setting.go",
+        "startLine": 83,
+        "endLine": 89
+      },
+      "subject": "SELECT",
+      "observation": "DB.ListInstanceSettings contains a SQL SELECT statement literal",
+      "method": "go-static"
+    },
+    {
+      "id": "ev-8636ad7171716cae",
+      "class": "observed",
+      "kind": "sql.statement",
+      "location": {
+        "path": "store/db/postgres/reaction.go",
+        "startLine": 81,
+        "endLine": 89
+      },
+      "subject": "SELECT",
+      "observation": "DB.ListReactions contains a SQL SELECT statement literal",
+      "method": "go-static"
+    },
+    {
+      "id": "ev-8f58ad3c02cf7521",
+      "class": "observed",
+      "kind": "proto.http-rule",
+      "location": {
+        "path": "proto/api/memo_service.proto",
+        "startLine": 122,
+        "endLine": 122
+      },
+      "subject": "/api/{parent=memos/*}/reactions",
+      "observation": "google.api.http binds rpc ListMemoReactions to GET /api/{parent=memos/*}/reactions",
+      "method": "proto-static"
+    },
+    {
+      "id": "ev-93702a4541c9a2e5",
+      "class": "inferred",
+      "kind": "link.test",
+      "subject": "TestAssignedMemoReactionsFollowMemoReadAccess",
+      "observation": "TestAssignedMemoReactionsFollowMemoReadAccess exercises rpc ListMemoReactions: it calls a method of that name and constructs ListMemoReactionsRequest",
+      "method": "derivation",
+      "basis": [
+        "ev-d3e5e8530c0a1ef0",
+        "ev-a1005e0384bdb0a5"
+      ]
+    },
+    {
+      "id": "ev-977e634ebb7b28fc",
+      "class": "inferred",
+      "kind": "link.test",
+      "subject": "TestListMemoReactionsSkipsMissingCreators",
+      "observation": "TestListMemoReactionsSkipsMissingCreators exercises rpc ListMemoReactions: it calls a method of that name and constructs ListMemoReactionsRequest",
+      "method": "derivation",
+      "basis": [
+        "ev-4559c73ec1c31a44",
+        "ev-b303135638ec1175"
+      ]
+    },
+    {
+      "id": "ev-98efea7d6ce36d82",
+      "class": "observed",
+      "kind": "go.status-code",
+      "location": {
+        "path": "server/api/memo_access.go",
+        "startLine": 58,
+        "endLine": 58
+      },
+      "subject": "Unauthenticated",
+      "observation": "memoAccessDecisionError uses google.golang.org/grpc/codes Unauthenticated, an authentication or authorization failure code",
+      "method": "go-static"
+    },
+    {
+      "id": "ev-a1005e0384bdb0a5",
+      "class": "observed",
+      "kind": "go.call",
+      "location": {
+        "path": "server/api/test/reaction_service_test.go",
+        "startLine": 214,
+        "endLine": 214
+      },
+      "subject": "ListMemoReactions",
+      "observation": "TestAssignedMemoReactionsFollowMemoReadAccess calls ts.Service.ListMemoReactions(…)",
+      "method": "go-static"
+    },
+    {
+      "id": "ev-a34fec1b9c57c694",
+      "class": "observed",
+      "kind": "go.function",
+      "location": {
+        "path": "server/api/reaction_service.go",
+        "startLine": 18,
+        "endLine": 51
+      },
+      "subject": "ListMemoReactions",
+      "observation": "method APIService.ListMemoReactions is declared",
+      "method": "go-static"
+    },
+    {
+      "id": "ev-aa52d57d92127759",
+      "class": "observed",
+      "kind": "go.test-function",
+      "location": {
+        "path": "server/api/test/memo_move_test.go",
+        "startLine": 16,
+        "endLine": 112
+      },
+      "subject": "TestMoveMemoPreservesIndependentConversation",
+      "observation": "test function TestMoveMemoPreservesIndependentConversation is declared",
+      "method": "go-static"
+    },
+    {
+      "id": "ev-b303135638ec1175",
+      "class": "observed",
+      "kind": "go.call",
+      "location": {
+        "path": "server/api/test/reaction_service_test.go",
+        "startLine": 504,
+        "endLine": 504
+      },
+      "subject": "ListMemoReactions",
+      "observation": "TestListMemoReactionsSkipsMissingCreators calls ts.Service.ListMemoReactions(…)",
+      "method": "go-static"
+    },
+    {
+      "id": "ev-b529c5da4a30e5f3",
+      "class": "inferred",
+      "kind": "link.rpc-handler",
+      "subject": "/memos.api.MemoService/ListMemoReactions",
+      "observation": "rpc ListMemoReactions is implemented by server/api:APIService.ListMemoReactions: it is the only method named ListMemoReactions that takes ListMemoReactionsRequest",
+      "method": "derivation",
+      "basis": [
+        "ev-162b62b11e5b3c85",
+        "ev-a34fec1b9c57c694"
+      ],
+      "limitations": [
+        "Dispatch through generated service registration is not traced."
+      ]
+    },
+    {
+      "id": "ev-ba558bd0ae8547f4",
+      "class": "observed",
+      "kind": "sql.statement",
+      "location": {
+        "path": "store/db/sqlite/reaction.go",
+        "startLine": 80,
+        "endLine": 88
+      },
+      "subject": "SELECT",
+      "observation": "DB.ListReactions contains a SQL SELECT statement literal",
+      "method": "go-static"
+    },
+    {
+      "id": "ev-bacda947da368697",
+      "class": "observed",
+      "kind": "sql.statement",
+      "location": {
+        "path": "store/db/postgres/user.go",
+        "startLine": 219,
+        "endLine": 233
+      },
+      "subject": "SELECT",
+      "observation": "DB.ListUsers contains a SQL SELECT statement literal",
+      "method": "go-static"
+    },
+    {
+      "id": "ev-c5f9f515f46dd119",
+      "class": "observed",
+      "kind": "sql.statement",
+      "location": {
+        "path": "store/db/mysql/memo.go",
+        "startLine": 238,
+        "endLine": 238
+      },
+      "subject": "SELECT",
+      "observation": "DB.ListMemos contains a SQL SELECT statement literal",
+      "method": "go-static"
+    },
+    {
+      "id": "ev-d165d04e8c7082f6",
+      "class": "observed",
+      "kind": "go.call",
+      "location": {
+        "path": "server/api/test/reaction_service_test.go",
+        "startLine": 48,
+        "endLine": 48
+      },
+      "subject": "ListMemoReactions",
+      "observation": "TestMemoReactionResourceNames calls ts.Service.ListMemoReactions(…)",
+      "method": "go-static"
+    },
+    {
+      "id": "ev-d3df0ac418032b6d",
+      "class": "observed",
+      "kind": "go.test-function",
+      "location": {
+        "path": "server/api/test/reaction_service_test.go",
+        "startLine": 16,
+        "endLine": 57
+      },
+      "subject": "TestMemoReactionResourceNames",
+      "observation": "test function TestMemoReactionResourceNames is declared",
+      "method": "go-static"
+    },
+    {
+      "id": "ev-d3e5e8530c0a1ef0",
+      "class": "observed",
+      "kind": "go.test-function",
+      "location": {
+        "path": "server/api/test/reaction_service_test.go",
+        "startLine": 179,
+        "endLine": 249
+      },
+      "subject": "TestAssignedMemoReactionsFollowMemoReadAccess",
+      "observation": "test function TestAssignedMemoReactionsFollowMemoReadAccess is declared",
+      "method": "go-static"
+    },
+    {
+      "id": "ev-da9d3a95b5188712",
+      "class": "observed",
+      "kind": "go.test-function",
+      "location": {
+        "path": "server/api/test/memo_service_test.go",
+        "startLine": 217,
+        "endLine": 272
+      },
+      "subject": "TestMemoReadFailsClosedForMissingCreatorBeforePaginationAndChildren",
+      "observation": "test function TestMemoReadFailsClosedForMissingCreatorBeforePaginationAndChildren is declared",
+      "method": "go-static"
+    },
+    {
+      "id": "ev-df8ebe32d9af75a2",
+      "class": "observed",
+      "kind": "sql.statement",
+      "location": {
+        "path": "store/db/sqlite/instance_setting.go",
+        "startLine": 79,
+        "endLine": 85
+      },
+      "subject": "SELECT",
+      "observation": "DB.ListInstanceSettings contains a SQL SELECT statement literal",
+      "method": "go-static"
+    },
+    {
+      "id": "ev-e9604aec3f6ad745",
+      "class": "observed",
+      "kind": "sql.statement",
+      "location": {
+        "path": "store/db/mysql/user.go",
+        "startLine": 230,
+        "endLine": 230
+      },
+      "subject": "SELECT",
+      "observation": "DB.ListUsers contains a SQL SELECT statement literal",
+      "method": "go-static"
+    },
+    {
+      "id": "ev-ea1f6a0c4b4d7950",
+      "class": "observed",
+      "kind": "go.method-reference",
+      "location": {
+        "path": "server/api/acl_config.go",
+        "startLine": 36,
+        "endLine": 36
+      },
+      "subject": "/memos.api.MemoService/ListMemoReactions",
+      "observation": "the literal /memos.api.MemoService/ListMemoReactions appears in var PublicMethods",
+      "method": "go-static"
+    },
+    {
+      "id": "ev-f7b0e36543b2b470",
+      "class": "observed",
+      "kind": "sql.statement",
+      "location": {
+        "path": "store/db/sqlite/user.go",
+        "startLine": 210,
+        "endLine": 224
+      },
+      "subject": "SELECT",
+      "observation": "DB.ListUsers contains a SQL SELECT statement literal",
+      "method": "go-static"
+    },
+    {
+      "id": "ev-f7f928461399276d",
+      "class": "observed",
+      "kind": "sql.statement",
+      "location": {
+        "path": "store/db/mysql/instance_setting.go",
+        "startLine": 92,
+        "endLine": 92
+      },
+      "subject": "SELECT",
+      "observation": "DB.ListInstanceSettings contains a SQL SELECT statement literal",
+      "method": "go-static"
+    },
+    {
+      "id": "ev-fb7daa9fc34fb0da",
+      "class": "inferred",
+      "kind": "link.test",
+      "subject": "TestMemoReactionResourceNames",
+      "observation": "TestMemoReactionResourceNames exercises rpc ListMemoReactions: it calls a method of that name and constructs ListMemoReactionsRequest",
+      "method": "derivation",
+      "basis": [
+        "ev-d3df0ac418032b6d",
+        "ev-d165d04e8c7082f6"
+      ]
+    }
+  ],
+  "findings": [],
+  "limitations": [
+    {
+      "code": "behaviors-not-equivalence",
+      "description": "Only the behaviors whose records say passed are verified, for this source revision, contract and adapter, in the states the tests created. Nothing establishes equivalence beyond them."
+    },
+    {
+      "code": "canonical-discovery-registry",
+      "description": "AppPort's in-process canonical discovery (@appport/core ApplicationDependencyResolver.discoverCanonical) reads an ApplicationRegistry that only accepts an in-process application's verify() result; registering the remote bridge's manifest there would fabricate that state. Discovery of the claim is verified through AppPort client discovery (appport.manifest) with @appport/protocol claimsFor and evaluateFulfillment, the checks discoverCanonical applies to each candidate."
+    },
+    {
+      "code": "host-composition",
+      "description": "The host re-states the bridge's build() descriptor to add one capability, because the bridge offers no extension point; the host test checks the composed manifest against the unmodified bridge's."
+    },
+    {
+      "code": "no-authority",
+      "description": "An extraction grants nothing. Invoking the capability requires the caller's own application credential and AppPort authorization at the boundary."
+    },
+    {
+      "code": "no-deployment",
+      "description": "Generating or verifying an extraction registers, publishes or deploys nothing."
+    },
+    {
+      "code": "not-source-extraction",
+      "description": "No application source is rewritten, generated or moved. The adapter exposes the existing operation through the application's existing AppPort boundary."
+    },
+    {
+      "code": "pagination-ignored",
+      "description": "Memos ignores page_size and page_token for this operation and returns every reaction; the capability passes both through unchanged and inherits that behavior."
+    },
+    {
+      "code": "source-revision-changed",
+      "description": "Revision 1 (c0eeec7a260ee58e2ed1514a61bfff1fa013f42e) could not publish the claim: the bridge kit's startBridge passed no manifest attributes to createApplication. Revision 2 is at e0ce8569589b2eccafd13e262ea3e320251858f2 (branch appport/bridge-manifest-attributes of rkendel1/memos), which adds only that pass-through and a kit test to appport-bridge/; Memos' Go code and protos are unchanged. Revision 1 and its failed result are kept in revisions/1/."
+    },
+    {
+      "code": "states-exercised",
+      "description": "Verified on a fresh SQLite instance with synthetic users (an administrator and two regular users), PRIVATE, PROTECTED and PUBLIC memos, zero, one and several reactions. MySQL and PostgreSQL drivers, archived memos, Spaces and instance settings that allow anonymous access were not exercised."
+    }
+  ],
+  "questions": [
+    {
+      "id": "q-adopt-contract",
+      "question": "Who adopts org.appworks.contracts.memos as a canonical contract, and under which contract id?"
+    },
+    {
+      "id": "q-anonymous",
+      "question": "Should anonymous callers be able to list reactions on PUBLIC memos through AppPort when the instance allows public access, as Memos' PublicMethods does?"
+    },
+    {
+      "id": "q-merge-bridge",
+      "question": "Should rkendel1/memos merge appport/bridge-manifest-attributes (e0ce856) into main, so later extractions can pin a main revision?"
+    }
+  ],
+  "scope": {
+    "grantsAuthority": false,
+    "executable": false,
+    "establishesEquivalence": false,
+    "modifiesTarget": false,
+    "deploys": false
+  },
+  "digest": "sha256:20b091270391b48ebfd6c44d65dbe243d9a725a914a5253384ced12f21fdee0e"
+}

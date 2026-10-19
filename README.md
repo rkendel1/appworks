@@ -11,9 +11,10 @@ discoverable and invocable through canonical capability contracts, and uses
 - [Recipe specification](spec/recipe-1.md): `appport.recipe/1`, `appport.recipe-lock/1`, `appport.recipe-package/1`, and the Distribution
   Protocol boundary.
 - [Assessment specification](spec/assessment-1.md): `appport.application-assessment/1`, the static reading of an existing application.
-- [Extraction specification](spec/extraction-1.md): `appport.capability-extraction/1`, one assessed operation exposed through the
+- [Extraction specification](spec/extraction-1.md): `appport.capability-extraction/2`, one assessed operation exposed through the
   application's existing AppPort boundary, with its contract, adapter and per-behavior verification.
-- [First extraction](extractions/memos-reactions): Memos `ListMemoReactions` as `memos.reactions.list@1`, verified against the real Memos.
+- [First extraction](extractions/memos-reactions): Memos `ListMemoReactions` as `memos.reactions.list@1`, with its AppPort fulfillment
+  claim published by the Memos bridge, verified against the real Memos (revision 2; revision 1 and its undeclared claim kept as history).
 
 ## Status
 
@@ -33,7 +34,7 @@ Published under the `@appport/*` ecosystem scope; owned, versioned and released 
 | [`@appport/recipe`](packages/recipe) | recipe source model, expressions, validation, locks, packages, JSON Schemas | `@appport/protocol` 1.2.0, `@appport/schema` 1.1.1, `@appport/integration` 1.2.0 (published); tested against `@appport/core` 1.3.0 |
 | [`@appport/recipe-distribution`](packages/recipe-distribution) | recipe package ↔ `distribution/1` release manifest; acceptance of acquired bytes | `@appport/recipe`, `@distribution-protocol/protocol` 1.0.0 |
 | [`@appport/assessment`](packages/assessment) | static assessment of an existing repository: evidence, capability candidates, readiness, a recommended exposure candidate (`appworks-assess`) | `@appport/protocol` 1.2.0 |
-| [`@appport/extraction`](packages/extraction) | extraction artifacts: eligibility, contract and mapping checks, adapter identity, per-behavior verification records, revision rules; the `appworks` CLI | `@appport/assessment`, `@appport/protocol` 1.2.0, `@appport/schema` 1.1.1 |
+| [`@appport/extraction`](packages/extraction) | extraction artifacts: eligibility, contract and mapping checks, adapter identity, fulfillment declarations, per-behavior verification records, revision rules; the `appworks` CLI | `@appport/assessment`, `@appport/protocol` 1.2.0, `@appport/schema` 1.1.1 |
 
 Adapters and their verification suites live in private, unpublished packages under [`extractions/`](extractions).
 
@@ -71,9 +72,10 @@ pnpm boundary:check   # dependency rules (docs/architecture.md §3)
 pnpm release:check    # pack, install outside the repository from the registry, run consumers and the installed CLI
 ```
 
-`APPWORKS_MEMOS_REPO=<checkout of rkendel1/memos at c0eeec7> pnpm test` also assesses the whole Memos repository
-(`packages/assessment/test/memos-full.test.ts`), and `MEMOS_REPO=<checkout> pnpm extraction:memos --check` builds and runs that Memos,
-verifies the extraction's behaviors against it and requires `extractions/memos-reactions/extraction.json` to reproduce. CI does both in
+`APPWORKS_MEMOS_REPO=<checkout of rkendel1/memos at e0ce856> pnpm test` also assesses the whole Memos repository
+(`packages/assessment/test/memos-full.test.ts`), and `MEMOS_REPO=<checkout> pnpm extraction:memos --check --mutations` builds and runs that Memos,
+verifies the extraction's declaration and behaviors against it, requires `extractions/memos-reactions/revisions/2/extraction.json` to
+reproduce and every known adapter defect to be caught. CI does both in
 its `memos` job (Go from the checkout's `go.mod`).
 
 No AppPort checkout is needed: AppPort and Distribution Protocol come from the npm registry at the versions the package manifests pin.

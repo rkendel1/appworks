@@ -106,7 +106,14 @@ bridge at `appport-bridge/` (trusted-boundary mode: `@appport/sdk` 1.2.2, `creat
 credential forwarded to Memos' own HTTP API). `extractions/memos-reactions/runtime/host.mjs` loads that bridge unmodified from the
 checkout and adds one capability definition to the same server, so discovery, transport, authentication and AppPort authorization are
 the bridge's, and every access decision is Memos'. The proposed contract is an AppPort canonical contract; conformance of the live
-capability is checked with AppPort's `compareSchemas`, and the fulfillment claim with `evaluateFulfillment`.
+capability is checked with AppPort's `compareSchemas`.
+
+The fulfillment claim is published through the same boundary. The host builds it with `@appport/protocol`'s `claimFor` and
+`fulfillmentAttributes` and passes it as manifest `extensions` and `attributes` to the bridge's `startBridge`, which hands them to
+AppPort's `createApplication`. That pass-through is a bridge change in the Memos fork (`e0ce856`); before it, the bridge had no supported
+way to publish a claim. The host checks the declaration against the contract before publishing and against the published manifest
+after, and stops otherwise. Discovery uses AppPort's client (`appport.manifest`), and the claim is judged by AppPort's `claimsFor` and
+`evaluateFulfillment`. AppWorks adds no declaration format, registry or authority, and the claim grants nothing.
 
 ## 7. Authority and evidence
 

@@ -1,21 +1,31 @@
 #!/usr/bin/env node
-// The end-to-end extraction of memos.reactions.list@1, reproducibly:
+// The end-to-end extraction of memos.reactions.list@1, reproducibly, in a fixed order:
 //
-//   1. assess the Memos checkout                      appworks assess
-//   2. run the behavioral verification suite          node --test test/behavior.test.mjs (real Memos, real bridge)
-//   3. bind assessment, plan, adapter and results     appworks extract --plan --verification
-//   4. verify the artifact against all of them        appworks verify-extraction
+//    1. validate the source revision and assess it           the checkout's HEAD is the plan's pinned revision; appworks assess
+//    2. validate the extraction inputs and history           revision 1 verifies as recorded; the plan, contract and declaration
+//    3. build Memos outside the checkout                     (by the suite, as the plan's runtime declares)
+//    4. start Memos with synthetic data                      (by the suite, through the Memos bridge's own harness)
+//    5. start the existing bridge with the extracted host    (by the suite)
+//    6. verify the declaration and discovery                 (by the suite)
+//    7. run the behavioral and authority tests               node --test test/behavior.test.mjs
+//    8. write the verification record and digest             appworks extract --plan --verification --previous; verify-extraction
+//    9. confirm the checkout is unchanged                    a tree hash before step 1 and after step 8
+//   10. report passed, failed and not-run separately         exit 0 only if every required behavior passed
 //
-//   MEMOS_REPO=<checkout at c0eeec7> [MEMOS_BIN=<memos build>] node scripts/extract.mjs [--write | --check]
+//   MEMOS_REPO=<checkout at the pinned revision> node scripts/extract.mjs [--write | --check] [--mutations]
 //
-// --write replaces extraction.json; --check (CI) fails unless the regenerated artifact has the committed digest.
-// Intermediate files go to a temporary directory; nothing is written to the checkout.
+// --write replaces revisions/<n>/extraction.json for the plan's revision; --check (CI) fails unless the regenerated
+// artifact has the committed digest. --mutations also runs scripts/mutations.mjs. Nothing depends on a previously
+// running server or on MEMOS_BIN (ignored here: the declared build is always made). Intermediate files go to a temporary
+// directory; nothing is written to the checkout.
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, copyFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { main } from "@appport/extraction";
+import { gitIdentity } from "@appport/assessment";
+import { main, readPlan, verifyExtractionAt } from "@appport/extraction";
+import { PINNED_REVISION, treeHash } from "../test/support/verification.mjs";
 
 const here = join(dirname(fileURLToPath(import.meta.url)), "..");
 const repo = process.env.MEMOS_REPO ? resolve(process.env.MEMOS_REPO) : undefined;
@@ -23,42 +33,83 @@ if (!repo) {
   console.error("MEMOS_REPO is not set: it names the Memos checkout at the source revision");
   process.exit(2);
 }
-const mode = process.argv[2] ?? "--dry-run";
+const args = process.argv.slice(2);
+const mode = args.find((a) => a === "--write" || a === "--check") ?? "--dry-run";
 const work = mkdtempSync(join(tmpdir(), "appworks-extraction-"));
-const step = (title, status) => {
-  if (status !== 0) {
-    console.error(`${title} failed (${status})`);
-    process.exit(1);
-  }
+const fail = (message) => {
+  console.error(`FAILED: ${message}`);
+  process.exit(1);
 };
+const step = (title, status) => {
+  if (status !== 0) fail(`${title} (exit ${status})`);
+};
+const plan = JSON.parse(readFileSync(join(here, "extraction-plan.json"), "utf8"));
+const revision = plan.identity.revision;
 const files = { assessment: join(work, "assessment.json"), results: join(work, "verification.json"), extraction: join(work, "extraction.json") };
+const committed = join(here, "revisions", String(revision), "extraction.json");
+const previous = revision > 1 ? join(here, "revisions", String(revision - 1), "extraction.json") : undefined;
 
-console.log("1. assess");
+const before = treeHash(repo);
+console.log("1. source revision and assessment");
+const head = gitIdentity(repo).revision;
+if (head !== PINNED_REVISION) fail(`the checkout is at ${head ?? "an unknown revision"}; the plan pins ${PINNED_REVISION}`);
 step("assessment", main(["assess", repo, "--output", files.assessment]));
-console.log("2. verify behaviors against the real operation");
-const tests = spawnSync(process.execPath, ["--no-warnings", "--import", join(here, "runtime", "register.mjs"), "--test", "--test-concurrency=1", "--test-reporter=spec", join(here, "test", "behavior.test.mjs")], {
-  cwd: here,
-  env: { ...process.env, MEMOS_REPO: repo, APPWORKS_VERIFICATION_OUT: files.results },
-  stdio: "inherit"
-});
-// A failing test is a result, not an error of this script: it is recorded as a failed behavior.
-console.log(`   tests exited ${tests.status}`);
-console.log("3. extract");
-const candidate = JSON.parse(readFileSync(join(here, "extraction-plan.json"), "utf8")).candidate;
-step("extraction", main(["extract", files.assessment, "--candidate", candidate, "--repo", repo, "--plan", join(here, "extraction-plan.json"), "--verification", files.results, "--output", files.extraction]));
-console.log("4. verify the extraction");
-step("verification", main(["verify-extraction", files.extraction, "--assessment", files.assessment, "--repo", repo, "--plan-dir", here]));
+step("assessment verification", main(["verify", files.assessment, "--repo", repo]));
 
-const produced = JSON.parse(readFileSync(files.extraction, "utf8"));
-if (mode === "--write") {
-  copyFileSync(files.extraction, join(here, "extraction.json"));
-  console.log(`wrote extraction.json ${produced.digest}`);
-} else if (mode === "--check") {
-  const committed = JSON.parse(readFileSync(join(here, "extraction.json"), "utf8"));
-  if (committed.digest !== produced.digest) {
-    console.error(`the committed extraction.json (${committed.digest}) is not what this run produces (${produced.digest}); see ${files.extraction}`);
-    process.exit(1);
-  }
-  console.log(`extraction.json reproduces: ${produced.digest}`);
+console.log("2. extraction inputs and history");
+if (previous) {
+  const prior = JSON.parse(readFileSync(previous, "utf8"));
+  const checked = verifyExtractionAt(prior, {});
+  if (!checked.ok) fail(`revision ${revision - 1} no longer verifies: ${checked.findings.map((f) => f.code).join(", ")}`);
+  if (plan.identity.previous !== prior.digest) fail(`the plan names ${plan.identity.previous} as revision ${revision - 1}; it is ${prior.digest}`);
+  console.log(`   revision ${revision - 1} (${prior.format}) verifies as recorded: ${prior.digest}`);
 }
-process.exit(tests.status === 0 ? 0 : 1);
+readPlan(join(here, "extraction-plan.json"), repo); // contained reads of the contract, adapter, declaration and boundary files
+
+console.log("3-7. build Memos, start it with synthetic data, start the bridge with the host, verify declaration, discovery and behavior");
+const env = { ...process.env, MEMOS_REPO: repo, APPWORKS_VERIFICATION_OUT: files.results };
+delete env.MEMOS_BIN;
+delete env.APPWORKS_HOST_DIR;
+delete env.APPWORKS_FULFILLMENT_DECLARATION;
+const tests = spawnSync(process.execPath, ["--no-warnings", "--import", join(here, "runtime", "register.mjs"), "--test", "--test-concurrency=1", "--test-reporter=spec", join(here, "test", "behavior.test.mjs")], { cwd: here, env, stdio: "inherit" });
+// A failing test is a result, not an error of this script: it is recorded as a failed behavior and reported below.
+console.log(`   tests exited ${tests.status}`);
+
+console.log("8. verification record and digest");
+step("extraction", main(["extract", files.assessment, "--candidate", plan.candidate, "--repo", repo, "--plan", join(here, "extraction-plan.json"), "--verification", files.results, ...(previous ? ["--previous", previous] : []), "--output", files.extraction]));
+step("extraction verification", main(["verify-extraction", files.extraction, "--assessment", files.assessment, "--repo", repo, "--plan-dir", here]));
+const produced = JSON.parse(readFileSync(files.extraction, "utf8"));
+
+console.log("9. checkout");
+const unchanged = treeHash(repo) === before;
+console.log(`   the checkout is ${unchanged ? "unchanged" : "CHANGED"} (tree hash over every file, .git included)`);
+
+let mutations = 0;
+if (args.includes("--mutations")) {
+  console.log("   mutation check");
+  mutations = spawnSync(process.execPath, [join(here, "scripts", "mutations.mjs")], { cwd: here, env: { ...env, APPWORKS_VERIFICATION_OUT: "" }, stdio: "inherit" }).status ?? 1;
+}
+
+console.log("10. result");
+const s = produced.verification.summary;
+const by = (status) => produced.verification.records.filter((r) => r.status === status).map((r) => `${r.behavior} (${r.against})`);
+console.log(`   passed (${s.passed}): ${by("passed").join(", ") || "none"}`);
+console.log(`   failed (${s.failed}): ${by("failed").join(", ") || "none"}`);
+console.log(`   inconclusive (${s.inconclusive}): ${by("inconclusive").join(", ") || "none"}`);
+console.log(`   not run or unsupported (${s["not-run"]}): ${by("not-run").join(", ") || "none"}`);
+console.log(`   extraction ${produced.identity.name} revision ${produced.identity.revision}: ${produced.digest}`);
+
+if (mode === "--write") {
+  mkdirSync(dirname(committed), { recursive: true });
+  copyFileSync(files.extraction, committed);
+  console.log(`   wrote ${committed}`);
+} else if (mode === "--check") {
+  const recorded = JSON.parse(readFileSync(committed, "utf8"));
+  if (recorded.digest !== produced.digest) fail(`the committed ${committed} (${recorded.digest}) is not what this run produces (${produced.digest}); see ${files.extraction}`);
+  console.log(`   ${committed} reproduces: ${produced.digest}`);
+}
+const allPassed = s.passed === produced.verification.records.length;
+if (!unchanged) fail("the checkout changed during the run");
+if (mutations !== 0) fail("a mutant survived the behavioral suite");
+if (tests.status !== 0 || !allPassed) fail(`not every required behavior passed (${s.passed} of ${produced.verification.records.length})`);
+console.log("   every required behavior passed for exactly this source revision, contract, adapter, declaration and runtime");
