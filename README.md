@@ -11,13 +11,18 @@ discoverable and invocable through canonical capability contracts, and uses
 - [Recipe specification](spec/recipe-1.md): `appport.recipe/1`, `appport.recipe-lock/1`, `appport.recipe-package/1`, and the Distribution
   Protocol boundary.
 - [Assessment specification](spec/assessment-1.md): `appport.application-assessment/1`, the static reading of an existing application.
+- [Extraction specification](spec/extraction-1.md): `appport.capability-extraction/1`, one assessed operation exposed through the
+  application's existing AppPort boundary, with its contract, adapter and per-behavior verification.
+- [First extraction](extractions/memos-reactions): Memos `ListMemoReactions` as `memos.reactions.list@1`, verified against the real Memos.
 
 ## Status
 
 **Draft.** This repository contains the recipe source model, its validation, dependency locks, source packages, the boundary with
-Distribution Protocol, and the first existing-application assessment (Go and Protocol Buffers). There is **no compiler, no runtime, no
-publishing or acquisition, no extraction and no migration** yet: nothing here executes a recipe, rewrites an application or establishes a
-business outcome, and an assessment verifies nothing. See the charter's status table.
+Distribution Protocol, the first existing-application assessment (Go and Protocol Buffers), and the first capability extraction
+(read-only operations, exposed through the application's existing AppPort boundary). There is **no compiler, no runtime, no publishing or
+acquisition, no source extraction and no migration** yet: nothing here executes a recipe, rewrites an application or establishes a
+business outcome; an assessment verifies nothing, and an extraction verifies only the behaviors it records as passed. See the charter's
+status table.
 
 ## Packages
 
@@ -27,7 +32,10 @@ Published under the `@appport/*` ecosystem scope; owned, versioned and released 
 |---|---|---|
 | [`@appport/recipe`](packages/recipe) | recipe source model, expressions, validation, locks, packages, JSON Schemas | `@appport/protocol` 1.2.0, `@appport/schema` 1.1.1, `@appport/integration` 1.2.0 (published); tested against `@appport/core` 1.3.0 |
 | [`@appport/recipe-distribution`](packages/recipe-distribution) | recipe package ↔ `distribution/1` release manifest; acceptance of acquired bytes | `@appport/recipe`, `@distribution-protocol/protocol` 1.0.0 |
-| [`@appport/assessment`](packages/assessment) | static assessment of an existing repository: evidence, capability candidates, readiness, a recommended exposure candidate; the `appworks` CLI | `@appport/protocol` 1.2.0 |
+| [`@appport/assessment`](packages/assessment) | static assessment of an existing repository: evidence, capability candidates, readiness, a recommended exposure candidate (`appworks-assess`) | `@appport/protocol` 1.2.0 |
+| [`@appport/extraction`](packages/extraction) | extraction artifacts: eligibility, contract and mapping checks, adapter identity, per-behavior verification records, revision rules; the `appworks` CLI | `@appport/assessment`, `@appport/protocol` 1.2.0, `@appport/schema` 1.1.1 |
+
+Adapters and their verification suites live in private, unpublished packages under [`extractions/`](extractions).
 
 ```ts
 import { validateRecipe, createRecipeLock, createRecipePackage, loadRecipePackage } from "@appport/recipe";
@@ -39,6 +47,9 @@ validateRecipe(recipe, { contracts, providers });                               
 ```sh
 appworks assess ../memos --output memos-assessment.json   # read-only; summary on stdout; partial assessments say so
 appworks verify memos-assessment.json --repo ../memos     # digest, evidence, no verified or authority claims, locations
+appworks extract memos-assessment.json --candidate cand-memos.api.MemoService.ListMemoReactions --repo ../memos \
+         --plan extractions/memos-reactions/extraction-plan.json --verification results.json --output extraction.json
+appworks verify-extraction extraction.json --assessment memos-assessment.json --repo ../memos --plan-dir extractions/memos-reactions
 ```
 
 ## Example
@@ -61,7 +72,9 @@ pnpm release:check    # pack, install outside the repository from the registry, 
 ```
 
 `APPWORKS_MEMOS_REPO=<checkout of rkendel1/memos at c0eeec7> pnpm test` also assesses the whole Memos repository
-(`packages/assessment/test/memos-full.test.ts`); CI does this in its own job.
+(`packages/assessment/test/memos-full.test.ts`), and `MEMOS_REPO=<checkout> pnpm extraction:memos --check` builds and runs that Memos,
+verifies the extraction's behaviors against it and requires `extractions/memos-reactions/extraction.json` to reproduce. CI does both in
+its `memos` job (Go from the checkout's `go.mod`).
 
 No AppPort checkout is needed: AppPort and Distribution Protocol come from the npm registry at the versions the package manifests pin.
 

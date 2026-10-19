@@ -1,0 +1,21 @@
+{
+  "name": "@appworks-extractions/memos-reactions",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Extraction of Memos MemoService.ListMemoReactions as the AppPort capability memos.reactions.list@1, hosted by the existing Memos AppPort bridge. Test and review material; not published.",
+  "type": "module",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@appport/sdk": "1.2.2"
+  },
+  "devDependencies": {
+    "@appport/assessment": "workspace:*",
+    "@appport/extraction": "workspace:*",
+    "@appport/protocol": "1.2.0",
+    "@appport/schema": "1.1.1"
+  },
+  "scripts": {
+    "test": "node --import ./runtime/register.mjs --test --test-concurrency=1 test/*.test.mjs",
+    "extract": "node scripts/extract.mjs"
+  }
+}

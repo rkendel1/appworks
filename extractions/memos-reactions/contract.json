@@ -1,0 +1,104 @@
+{
+  "protocol": "appport/1",
+  "application": {
+    "id": "org.appworks.contracts.memos",
+    "name": "Memos capabilities (proposed canonical contract)",
+    "version": "1.0.0",
+    "description": "Canonical contract proposed by the AppWorks extraction of Memos MemoService.ListMemoReactions at c0eeec7a260ee58e2ed1514a61bfff1fa013f42e. Proposed, not adopted: it defines what a provider must offer, and grants nothing."
+  },
+  "extensions": ["appport.canonical-contract/1"],
+  "capabilities": [
+    {
+      "name": "memos.reactions.list",
+      "versions": [1],
+      "latestVersion": 1,
+      "description": "List the reactions on one memo, if Memos lets the caller read that memo.",
+      "kind": "request",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "parent": { "type": "string", "description": "Memo resource name, e.g. memos/AbC123", "pattern": "^memos/[A-Za-z0-9_-]{1,64}$" },
+          "pageSize": { "type": "integer", "minimum": -2147483648, "maximum": 2147483647 },
+          "pageToken": { "type": "string" }
+        },
+        "additionalProperties": false,
+        "required": ["parent"]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "reactions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string", "description": "memos/{memo}/reactions/{reaction}" },
+                "creator": { "type": "string", "description": "users/{user}" },
+                "reactionType": { "type": "string" },
+                "createTime": { "type": "string", "format": "date-time" }
+              },
+              "additionalProperties": false,
+              "required": ["name", "creator", "reactionType", "createTime"]
+            }
+          },
+          "nextPageToken": { "type": "string" }
+        },
+        "additionalProperties": false,
+        "required": ["reactions", "nextPageToken"]
+      },
+      "authorization": ["memos.read"],
+      "effect": "observation",
+      "authorizationContract": { "required": true, "scopes": ["memos.read"] },
+      "authorizationVersion": 1,
+      "idempotency": "unsupported",
+      "concurrency": { "mode": "parallel" },
+      "definitions": [
+        {
+          "version": 1,
+          "description": "List the reactions on one memo, if Memos lets the caller read that memo.",
+          "kind": "request",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "parent": { "type": "string", "description": "Memo resource name, e.g. memos/AbC123", "pattern": "^memos/[A-Za-z0-9_-]{1,64}$" },
+              "pageSize": { "type": "integer", "minimum": -2147483648, "maximum": 2147483647 },
+              "pageToken": { "type": "string" }
+            },
+            "additionalProperties": false,
+            "required": ["parent"]
+          },
+          "outputSchema": {
+            "type": "object",
+            "properties": {
+              "reactions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": { "type": "string", "description": "memos/{memo}/reactions/{reaction}" },
+                    "creator": { "type": "string", "description": "users/{user}" },
+                    "reactionType": { "type": "string" },
+                    "createTime": { "type": "string", "format": "date-time" }
+                  },
+                  "additionalProperties": false,
+                  "required": ["name", "creator", "reactionType", "createTime"]
+                }
+              },
+              "nextPageToken": { "type": "string" }
+            },
+            "additionalProperties": false,
+            "required": ["reactions", "nextPageToken"]
+          },
+          "authorization": ["memos.read"],
+          "effect": "observation",
+          "authorizationContract": { "required": true, "scopes": ["memos.read"] },
+          "authorizationVersion": 1,
+          "idempotency": "unsupported",
+          "concurrency": { "mode": "parallel" }
+        }
+      ]
+    }
+  ],
+  "events": [],
+  "transports": []
+}

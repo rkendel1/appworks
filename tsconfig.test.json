@@ -10,6 +10,7 @@
     "rootDir": ".",
     "paths": {
       "@appport/assessment": ["./packages/assessment/src/index.ts"],
+      "@appport/extraction": ["./packages/extraction/src/index.ts"],
       "@appport/recipe": ["./packages/recipe/src/index.ts"],
       "@appport/recipe-distribution": ["./packages/recipe-distribution/src/index.ts"]
     }

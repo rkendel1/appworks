@@ -1,0 +1,114 @@
+{
+  "format": "appport.capability-extraction-plan/1",
+  "candidate": "cand-memos.api.MemoService.ListMemoReactions",
+  "identity": { "name": "memos.reactions.list", "revision": 1 },
+  "contract": "contract.json",
+  "mapping": {
+    "changes": [
+      {
+        "direction": "input",
+        "kind": "input.pattern-changed",
+        "target": "parent",
+        "reason": "The proto field is any string. The contract accepts memo resource names exactly as the bridge's existing memos.get does (memos/ and 1-64 letters, digits, '_' or '-'), a superset of the UIDs Memos creates at this revision (identifier.UIDMatcher, 1-36 letters, digits or '-'; generated shortuuid). Path-like and malformed names are refused before Memos is contacted, so the adapter can build GET /api/{parent}/reactions safely. Memos itself answers 404 for names it cannot resolve, so no name Memos would answer with reactions is refused."
+      },
+      {
+        "direction": "input",
+        "kind": "description.changed",
+        "target": "parent",
+        "reason": "The contract documents the resource-name format."
+      },
+      {
+        "direction": "input",
+        "kind": "input.bound-tightened",
+        "target": "pageSize",
+        "reason": "page_size is an int32 field: the bounds are the proto type's own range, which the assessment's JSON Schema mapping does not express. No value Memos accepts is refused. Memos currently ignores page_size and page_token and returns all reactions (memo_service.proto)."
+      },
+      {
+        "direction": "output",
+        "kind": "description.changed",
+        "target": "reactions[].name",
+        "reason": "The contract documents the resource-name format, memos/{memo}/reactions/{reaction}."
+      },
+      {
+        "direction": "output",
+        "kind": "description.changed",
+        "target": "reactions[].creator",
+        "reason": "The contract documents the resource-name format, users/{user}."
+      }
+    ],
+    "decisions": [
+      {
+        "subject": "capability name",
+        "decision": "memos.reactions.list, not the assessment's memo.reactions.list",
+        "reason": "The existing Memos bridge names its capabilities in the memos namespace (memos.search, memos.get); the extracted capability joins them on the same boundary."
+      },
+      {
+        "subject": "input additionalProperties",
+        "decision": "false",
+        "reason": "Memos' gateway discards unknown fields (DiscardUnknown); the capability refuses them instead of silently ignoring them, as the bridge's existing capabilities do."
+      },
+      {
+        "subject": "output required members",
+        "decision": "reactions, nextPageToken and every Reaction field are required",
+        "reason": "Memos' gateway writes default values (EmitDefaultValues, server/api/api.go), and the adapter maps an absent repeated or string field to its proto3 default ([] or \"\"), so every member is always present; nothing is nullable."
+      },
+      {
+        "subject": "authorization",
+        "decision": "scope memos.read, required",
+        "reason": "The bridge's own scope, granted to any caller presenting a Memos credential; Memos' checkMemoReadAccess decides each access with that credential."
+      }
+    ],
+    "fields": [
+      { "direction": "input", "contract": "/parent", "source": "ListMemoReactionsRequest.parent (path parameter)", "rule": "identity" },
+      { "direction": "input", "contract": "/pageSize", "source": "ListMemoReactionsRequest.page_size (query parameter pageSize)", "rule": "identity" },
+      { "direction": "input", "contract": "/pageToken", "source": "ListMemoReactionsRequest.page_token (query parameter pageToken)", "rule": "identity" },
+      { "direction": "output", "contract": "/reactions", "source": "ListMemoReactionsResponse.reactions", "rule": "default-if-absent" },
+      { "direction": "output", "contract": "/reactions/*/name", "source": "Reaction.name", "rule": "identity" },
+      { "direction": "output", "contract": "/reactions/*/creator", "source": "Reaction.creator", "rule": "identity" },
+      { "direction": "output", "contract": "/reactions/*/reactionType", "source": "Reaction.reaction_type", "rule": "identity" },
+      { "direction": "output", "contract": "/reactions/*/createTime", "source": "Reaction.create_time (RFC 3339)", "rule": "identity" },
+      { "direction": "output", "contract": "/nextPageToken", "source": "ListMemoReactionsResponse.next_page_token", "rule": "default-if-absent" }
+    ]
+  },
+  "adapter": {
+    "name": "memos-reactions-adapter",
+    "version": "1.0.0",
+    "files": ["runtime/adapter.mjs", "runtime/host.mjs", "runtime/register.mjs", "runtime/resolve-hooks.mjs"],
+    "packages": { "@appport/sdk": "1.2.2" },
+    "boundary": {
+      "name": "memos-appport-bridge",
+      "description": "The Memos AppPort bridge (appport-bridge/) at the source revision, loaded unmodified: one AppPort server in trusted-boundary mode; authentication records the caller's Memos credential; permissionAuthorizer; capabilities call Memos' own HTTP API with that credential.",
+      "files": ["appport-bridge/bridge.mjs", "appport-bridge/lib/bridge-kit.mjs", "appport-bridge/package-lock.json"],
+      "invocation": { "method": "GET", "path": "/api/{parent}/reactions" }
+    }
+  },
+  "authorization": {
+    "requirements": [
+      "AppPort: the caller presents an application credential (the bridge's authenticate) and holds scope memos.read, which the bridge grants to every credential-bearing caller; anonymous calls are refused by AppPort before Memos is contacted.",
+      "Memos: the credential is a valid Memos access token (Memos answers 401 otherwise).",
+      "Memos: the caller may read the parent memo (checkMemoReadAccess): its creator, any signed-in user for PROTECTED, anyone for PUBLIC; Memos answers 403 (permission denied) or 404 otherwise."
+    ],
+    "restrictions": [
+      "Memos lists ListMemoReactions in PublicMethods; through AppPort a credential is always required, so anonymous reads Memos might allow on an instance with public access are not offered. This narrows access and never widens it.",
+      "The bridge holds no credential and stores nothing; every result is what Memos returned to the caller's own credential.",
+      "Memos' instance-administrator access (admins may read any memo) applies unchanged through the capability."
+    ]
+  },
+  "environment": [
+    "A Memos server built from the source revision, reachable from the bridge at APPPORT_BRIDGE_UPSTREAM.",
+    "The Memos bridge at the source revision (MEMOS_REPO), hosted with runtime/register.mjs and runtime/host.mjs on Node 22.13 or later.",
+    "@appport/sdk 1.2.2, the version the bridge's package-lock.json pins, with its exact @appport/* dependencies.",
+    "Callers present their own Memos personal access token as `authorization: Bearer <token>`; put TLS in front of the bridge beyond localhost."
+  ],
+  "limitations": [
+    { "code": "fulfillment-claim-unpublished", "description": "The bridge kit at the source revision passes no manifest attributes to AppPort, so the boundary cannot publish a fulfillment claim for the proposed contract; AppPort's evaluateFulfillment therefore reports claim.undeclared. Publishing the claim needs a one-line change to the bridge at a new Memos revision, which this extraction does not make." },
+    { "code": "pagination-ignored", "description": "Memos ignores page_size and page_token for this operation and returns every reaction; the capability passes both through unchanged and inherits that behavior." },
+    { "code": "states-exercised", "description": "Verified on a fresh SQLite instance with synthetic users (an administrator and two regular users), PRIVATE, PROTECTED and PUBLIC memos, zero, one and several reactions. MySQL and PostgreSQL drivers, archived memos, Spaces and instance settings that allow anonymous access were not exercised." },
+    { "code": "host-composition", "description": "The host re-states the bridge's build() descriptor to add one capability, because the bridge offers no extension point; the host test checks the composed manifest against the unmodified bridge's." }
+  ],
+  "questions": [
+    { "id": "q-adopt-contract", "question": "Who adopts org.appworks.contracts.memos as a canonical contract, and under which contract id?" },
+    { "id": "q-anonymous", "question": "Should anonymous callers be able to list reactions on PUBLIC memos through AppPort when the instance allows public access, as Memos' PublicMethods does?" },
+    { "id": "q-publish-claim", "question": "Should the Memos bridge pass manifest attributes so it can publish fulfillment claims (a change at a new Memos revision)?" }
+  ]
+}

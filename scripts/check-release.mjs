@@ -74,7 +74,8 @@ for (const name of Object.keys(manifests)) {
   }
 }
 const recipeManifest = manifests["@appport/recipe"];
-for (const [name, version] of Object.entries({ ...recipeManifest.dependencies, ...manifests["@appport/assessment"].dependencies, "@appport/core": coreVersion })) {
+const external = (deps) => Object.fromEntries(Object.entries(deps ?? {}).filter(([name]) => !manifests[name]));
+for (const [name, version] of Object.entries({ ...recipeManifest.dependencies, ...manifests["@appport/assessment"].dependencies, ...external(manifests["@appport/extraction"].dependencies), "@appport/core": coreVersion })) {
   const installed = JSON.parse(readFileSync(join(project, "node_modules", name, "package.json"), "utf8")).version;
   if (installed !== version) {
     console.error(`${name}: installed ${installed}, the manifest declares ${version}`);
@@ -157,4 +158,42 @@ a.candidates[0].readiness.class = "verified";
 check(!verifyAssessment(a).ok, "a claim of verification is refused");
 `);
 process.stdout.write(run("node", ["assessment.mjs"], { cwd: project }).stdout);
+// 8. The installed `appworks extract` refuses an assessment that is not tied to a revision, extracts from one that is
+//    (a scratch copy given a synthetic git HEAD: this checks the tool, not Memos), and the installed library and shipped
+//    schema verify both that artifact and the committed Memos extraction against its adapter sources.
+const refused = spawnSync(bin, ["extract", join(project, "assessment.json"), "--candidate", "cand-memos.api.UserService.ListUsers", "--repo", memos, "--output", join(project, "refused.json")], { cwd: project, encoding: "utf8" });
+if (refused.status !== 4 || !refused.stderr.includes("ASSESSMENT_REVISION_MISSING")) {
+  console.error(`appworks extract accepted an unpinned assessment (${refused.status}): ${refused.stderr}`);
+  process.exit(1);
+}
+console.log("  ok  appworks extract refuses an assessment without a source revision (exit 4, ASSESSMENT_REVISION_MISSING)");
+const pinned = join(scratch, "memos-pinned");
+cpSync(memos, pinned, { recursive: true });
+mkdirSync(join(pinned, ".git"));
+writeFileSync(join(pinned, ".git", "HEAD"), `${"1".repeat(40)}\n`);
+const pinnedBefore = listing(pinned);
+run(bin, ["assess", pinned, "--output", join(project, "pinned-assessment.json")], { cwd: project });
+const extracted = run(bin, ["extract", join(project, "pinned-assessment.json"), "--candidate", "cand-memos.api.UserService.ListUsers", "--repo", pinned, "--output", join(project, "extraction.json")], { cwd: project });
+process.stdout.write(`${extracted.stdout.trimEnd().split("\n").slice(0, 4).join("\n").replace(/^/gm, "  | ")}\n`);
+run(bin, ["verify-extraction", join(project, "extraction.json"), "--assessment", join(project, "pinned-assessment.json"), "--repo", pinned], { cwd: project });
+if (listing(pinned) !== pinnedBefore) {
+  console.error("the repository changed during extraction");
+  process.exit(1);
+}
+writeFileSync(join(project, "extraction.mjs"), `
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { fromJSONSchema } from "@appport/schema";
+import { EXTRACTION_FORMAT, verifyExtraction, verifyExtractionAt } from "@appport/extraction";
+const check = (ok, message) => { if (!ok) { console.error("FAIL", message); process.exit(1); } console.log("  ok ", message); };
+const require = createRequire(import.meta.url);
+const schema = fromJSONSchema(JSON.parse(readFileSync(require.resolve("@appport/extraction/package.json").replace(/package\\.json$/, "schemas/capability-extraction.schema.json"), "utf8")));
+const x = JSON.parse(readFileSync("extraction.json", "utf8"));
+check(x.format === EXTRACTION_FORMAT && x.stage === "proposed" && x.adapter === null && x.verification.summary.passed === 0 && schema.validate(x).ok, "the installed CLI proposes an extraction: no adapter, nothing verified, schema-valid");
+const memos = JSON.parse(readFileSync(${JSON.stringify(join(root, "extractions", "memos-reactions", "extraction.json"))}, "utf8"));
+check(schema.validate(memos).ok && verifyExtractionAt(memos, { planDirectory: ${JSON.stringify(join(root, "extractions", "memos-reactions"))} }).ok, "the committed Memos extraction verifies against its adapter sources with the installed library");
+x.scope.grantsAuthority = true;
+check(!verifyExtraction(x).ok, "an extraction claiming authority is refused");
+`);
+process.stdout.write(run("node", ["extraction.mjs"], { cwd: project }).stdout);
 console.log(`\nRelease check passed (${project})`);

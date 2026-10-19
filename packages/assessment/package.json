@@ -15,7 +15,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "appworks": "./dist/cli.js"
+    "appworks-assess": "./dist/cli.js"
   },
   "exports": {
     ".": {

@@ -25,8 +25,9 @@ jobs:
       - run: pnpm boundary:check
       - run: pnpm release:check
 
-  # The assessment of a whole real application: Memos at the commit the AppPort integration used, read-only.
-  memos-assessment:
+  # The assessment of a whole real application, and the extraction of one of its operations verified against it:
+  # Memos at the commit the AppPort integration used. Memos is built and run from a read-only checkout.
+  memos:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -36,12 +37,22 @@ jobs:
           ref: c0eeec7a260ee58e2ed1514a61bfff1fa013f42e
           path: _memos
           persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: _memos/go.mod
+          cache: false
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm build
       - run: pnpm vitest run packages/assessment/test/memos-full.test.ts
         env:
           APPWORKS_MEMOS_REPO: ${{ github.workspace }}/_memos
+      # Assess, build Memos (outside the checkout) and run the behavioral suite against the real operation, extract, verify,
+      # and require the committed extraction.json to be exactly what this run produces.
+      - run: pnpm extraction:memos --check
+        env:
+          MEMOS_REPO: ${{ github.workspace }}/_memos

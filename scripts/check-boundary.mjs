@@ -13,6 +13,10 @@
 // 6. @appport/assessment depends only on @appport/protocol at run time and never on @appport/core or Distribution
 //    Protocol. Its source contains no code-execution or network primitive, and only its CLI writes a file (the
 //    assessment output): it reads the repository it assesses and nothing else.
+// 7. @appport/extraction depends only on @appport/protocol, @appport/schema and @appport/assessment at run time; never
+//    on @appport/core, @appport/sdk or Distribution Protocol; nothing depends on it from below (assessment, recipe).
+//    Its source has no code-execution or network primitive, and only its CLI writes a file. Adapters live in private
+//    packages under extractions/, are never shipped, and pin AppPort exactly.
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -54,6 +58,34 @@ else {
     if (/\beval\s*\(|new\s+Function\s*\(|child_process|node:vm\b|\bimport\s*\(|node:(?:http|https|http2|net|tls|dgram|dns|worker_threads)\b|\bfetch\s*\(|\bWebSocket\b/.test(text)) fail(`${file} contains a code-execution or network primitive; assessment only reads`);
     const writes = text.match(/\b(?:writeFile|appendFile|mkdir|rmdir|rm|unlink|rename|chmod|chown|symlink|link|copyFile|truncate|utimes|cp|createWriteStream|mkdtemp)(?:Sync)?\s*\(/g) ?? [];
     if (writes.length && !file.endsWith("/src/cli.ts")) fail(`${file} writes to the filesystem (${writes.join(", ")}); only the CLI writes, and only its output file`);
+  }
+}
+
+const extraction = byName["@appport/extraction"];
+if (!extraction) fail("@appport/extraction is missing");
+else {
+  const allowed = new Set(["@appport/protocol", "@appport/schema", "@appport/assessment"]);
+  for (const name of Object.keys({ ...extraction.manifest.dependencies, ...extraction.manifest.peerDependencies })) {
+    if (!allowed.has(name)) fail(`@appport/extraction depends on ${name}; it may depend only on ${[...allowed].join(", ")}`);
+  }
+  for (const name of ["@appport/core", "@appport/sdk"]) if (name in { ...extraction.manifest.devDependencies }) fail(`@appport/extraction depends on ${name}; adapters that need it live under extractions/`);
+  for (const file of walk(`${extraction.dir}/src`).filter((f) => f.endsWith(".ts"))) {
+    const text = read(file);
+    if (/\beval\s*\(|new\s+Function\s*\(|child_process|node:vm\b|\bimport\s*\(|node:(?:http|https|http2|net|tls|dgram|dns|worker_threads|module)\b|\bfetch\s*\(|\bWebSocket\b|\brequire\s*\(/.test(text)) fail(`${file} contains a code-execution or network primitive; extraction reads and binds, it never runs an adapter`);
+    const writes = text.match(/\b(?:writeFile|appendFile|mkdir|rmdir|rm|unlink|rename|chmod|chown|symlink|link|copyFile|truncate|utimes|cp|createWriteStream|mkdtemp)(?:Sync)?\s*\(/g) ?? [];
+    if (writes.length && !file.endsWith("/src/cli.ts")) fail(`${file} writes to the filesystem (${writes.join(", ")}); only the CLI writes, and only its output file`);
+  }
+}
+for (const lower of ["@appport/assessment", "@appport/recipe", "@appport/recipe-distribution"]) {
+  const m = byName[lower]?.manifest;
+  if (m && "@appport/extraction" in { ...m.dependencies, ...m.peerDependencies, ...m.devDependencies }) fail(`${lower} depends on @appport/extraction; extraction consumes assessments, never the reverse`);
+}
+for (const dir of readdirSync(join(root, "extractions"))) {
+  const manifest = json(`extractions/${dir}/package.json`);
+  if (manifest.private !== true) fail(`extractions/${dir} must be private: adapters are review and test material, not published packages`);
+  for (const [name, spec] of Object.entries({ ...manifest.dependencies, ...manifest.devDependencies })) {
+    if (name.startsWith("@appport/") && !byName[name] && !/^\d+\.\d+\.\d+$/.test(spec)) fail(`extractions/${dir} depends on ${name}@${spec}; AppPort packages are pinned exactly`);
+    if (name.startsWith("@distribution-protocol/")) fail(`extractions/${dir} depends on ${name}`);
   }
 }
 
