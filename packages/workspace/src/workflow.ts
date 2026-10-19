@@ -31,7 +31,7 @@ import { reconcile, type ExtractionBinding, type InventoryRecord, type MatchDeci
 import { acquireCheckout, commitInfo, commitWorktree, createPromotionWorktree, worktreePatch, worktreeState, type RepositoryProvider } from "./repository.js";
 import { directoryDigest, installPackages, listExtractions, runExtraction, runPromotionVerification, startIntegration, type ExtractionEntry, type RunnerResult } from "./runner.js";
 import { proposeInstallation, type AppPortInstallation } from "./install.js";
-import { sha256, Store, type Write } from "./store.js";
+import { sha256, Store, type Collection, type Write } from "./store.js";
 
 export interface WorkspaceOptions {
   /** The workspace home: FeltDB state, artifact bodies and isolated checkouts. */
@@ -718,7 +718,7 @@ export class Workspace {
    * Grants an approval for exactly `subject`. The principal needs `approval.grant:<action>`; a subject that is not the
    * action's current subject is refused, so an approval never covers inputs that changed after it was asked for.
    */
-  async approve(principal: Principal, id: string, input: { action: ApprovalAction; subject: string; head?: string; base?: string }): Promise<ApprovalRecord> {
+  async approve(principal: Principal, id: string, input: { action: ApprovalAction; subject: string; head?: string; base?: string }, via?: ApprovalRecord["grantedVia"]): Promise<ApprovalRecord> {
     if (!(APPROVAL_ACTIONS as readonly string[]).includes(input.action)) throw new WorkspaceError("INVALID_INPUT", `approval actions are ${APPROVAL_ACTIONS.join(", ")}`);
     await requireAllowed(this.authority, principal, `approval.grant:${input.action}`, { project: id });
     const p = await this.load(id);
@@ -735,12 +735,12 @@ export class Workspace {
     const existing = await this.store.get<ApprovalRecord>("Approval", recordId);
     if (existing && existing.status === "granted") return existing;
     if (existing && existing.status === "consumed") throw new WorkspaceError("APPROVAL_CONSUMED", "this approval was already used; the action ran");
-    const approval: ApprovalRecord = { ...(existing ?? { id: recordId, projectId: id, action: input.action, subject: current.subject, subjectDescription: current.description, requestedAt: at, requestedBy: principal.id }), status: "granted", grantedAt: at, grantedBy: principal.id } as ApprovalRecord;
+    const approval: ApprovalRecord = { ...(existing ?? { id: recordId, projectId: id, action: input.action, subject: current.subject, subjectDescription: current.description, requestedAt: at, requestedBy: principal.id }), status: "granted", grantedAt: at, grantedBy: principal.id, ...(via ? { grantedVia: via } : {}) } as ApprovalRecord;
     if (input.action === "modify-integration") {
       const promotion = await this.currentPromotion(p);
       if (promotion && promotion.digest === current.subject && promotion.state === "proposed") extra.push({ collection: "Promotion", id: promotion.id, value: { ...promotion, state: "approved", approval: recordId, updatedAt: at } as never, ifVersion: promotion.__version! });
     }
-    const event: StageEvent = { id: `${id}.${String(p.history).padStart(4, "0")}`, projectId: id, sequence: p.history, step: "approve", from: p.stage, to: p.stage, condition: p.condition.state, at, actor: principal.id, evidence: [recordId, current.subject], reasons: [], note: `approved ${input.action}` };
+    const event: StageEvent = { id: `${id}.${String(p.history).padStart(4, "0")}`, projectId: id, sequence: p.history, step: "approve", from: p.stage, to: p.stage, condition: p.condition.state, at, actor: principal.id, evidence: [recordId, current.subject], reasons: [], note: via ? `approved ${input.action} under the bounded-run policy of ${via.run} granted by ${via.by} (scope ${via.scope.join(", ")})` : `approved ${input.action}` };
     await this.store.commit([
       existing ? { collection: "Approval", id: recordId, value: approval as never, ifVersion: (existing as ApprovalRecord & { __version: number }).__version } : { collection: "Approval", id: recordId, value: approval as never, create: true },
       { collection: "Project", id, value: { ...p, updatedAt: at, history: p.history + 1 } as never, ifVersion: p.__version },
@@ -918,6 +918,31 @@ export class Workspace {
       { collection: "StageEvent", id: event.id, value: event as never, create: true }
     ]);
     return this.load(id);
+  }
+
+  /**
+   * Deletes the project and every record that belongs to it (stage history, runs, artifacts, approvals, decisions,
+   * verifications, promotions and agent runs). Refused while a step is running on it. Content-addressed artifact
+   * bodies stay on disk: another project may reference the same digest.
+   */
+  async deleteProject(principal: Principal, id: string): Promise<{ deleted: string; records: number }> {
+    await requireAllowed(this.authority, principal, "project.delete", { project: id });
+    const p = await this.load(id);
+    if (p.activeRun) {
+      const active = await this.store.get<Run>("Run", p.activeRun);
+      if (active?.status === "running" && active.leaseExpiresAt > this.iso()) throw new WorkspaceError("STEP_IN_PROGRESS", `${active.step} is running on ${id}; stop or wait for it before deleting the project`);
+    }
+    let records = 0;
+    const remove = async (collection: Collection, ids: string[]) => {
+      for (const rid of ids) await this.store.remove(collection, rid);
+      records += ids.length;
+    };
+    const agentRuns = await this.store.list<{ id: string }>("AgentRun", { projectId: id });
+    for (const run of agentRuns) await remove("AgentTurn", (await this.store.list<{ id: string }>("AgentTurn", { runId: run.id })).map((t) => t.id));
+    await remove("AgentRun", agentRuns.map((r) => r.id));
+    for (const collection of ["StageEvent", "Run", "Artifact", "Approval", "Decision", "Verification", "Promotion"] as const) await remove(collection, (await this.store.list<{ id: string }>(collection, { projectId: id })).map((r) => r.id));
+    await this.store.remove("Project", id);
+    return { deleted: id, records: records + 1 };
   }
 
   /**

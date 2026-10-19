@@ -197,6 +197,25 @@
       }
     }
 
+    async function deleteProject(p) {
+      outcome.replaceChildren();
+      try {
+        await S.confirmAction({
+          id: 'delete-project',
+          title: 'Delete ' + p.repository.owner + '/' + p.repository.name + '?',
+          description: 'Deletes project ' + p.id + ' and its records: stage history, runs, approvals, decisions, verifications and agent runs.',
+          consequences: ['This cannot be undone.', 'Artifact files are content-addressed and shared, so they stay on disk.', 'It is refused while a step is running.'],
+          confirmLabel: 'Delete project',
+          action: async () => {
+            await request('/api/projects/' + encodeURIComponent(p.id) + '/actions/delete', 'POST', {});
+            location.assign('/');
+          },
+        });
+      } catch (error) {
+        outcome.replaceChildren(S.dom.ErrorPanel({ title: 'The project was not deleted', message: error.message, code: error.code }));
+      }
+    }
+
     async function agentAct(action, input) {
       outcome.replaceChildren();
       try {
@@ -228,7 +247,23 @@
       const r = c && c.run;
       const buttons = [];
       const holding = r && (r.status === 'running' || r.status === 'paused');
-      if (!holding && !a.configured.error) buttons.push(S.dom.Button({ label: 'Run agent', variant: 'primary', attrs: { 'data-agent': 'start' }, onClick: () => agentAct('start', {}) }));
+      const endToEnd = (verb, input) => S.confirmAction({
+        id: 'agent-end-to-end',
+        title: 'Run end to end?',
+        description: 'The agent will carry this project through the workflow by itself, choosing each action from the recorded evidence.',
+        consequences: [
+          'For this run only, AppWorks will approve the generate-files approval (which covers execute) for the exact subject the run asks for, as your approval under a bounded-run policy. The record says so.',
+          'A changed or stale subject is refused, and the run then pauses for you.',
+          'Nothing else is pre-approved: integration changes, contract adoption, commit, push, pull request and promotion still stop and wait for you.',
+          'The agent cannot change this policy. Stop the run at any time.',
+        ],
+        confirmLabel: verb,
+        action: () => agentAct(input.run ? 'resume' : 'start', { ...input, endToEnd: true }),
+      });
+      if (!holding && !a.configured.error) {
+        buttons.push(S.dom.Button({ label: 'Run end to end', variant: 'primary', attrs: { 'data-agent': 'end-to-end' }, onClick: () => endToEnd('Run end to end', {}) }));
+        buttons.push(S.dom.Button({ label: 'Run agent (manual approvals)', variant: 'ghost', attrs: { 'data-agent': 'start' }, onClick: () => agentAct('start', {}) }));
+      }
       if (r && r.status === 'running' && !r.interrupted && !r.cancelRequested) buttons.push(S.dom.Button({ label: 'Stop agent', variant: 'ghost', attrs: { 'data-agent': 'stop' }, onClick: () => agentAct('stop', { run: r.id, reason: 'stopped from the web workspace' }) }));
       if (r && (r.status === 'paused' || r.interrupted) && !a.configured.error) {
         const switching = r.agent.provider !== a.configured.provider || (r.agent.model || '') !== (a.configured.model || '');
@@ -243,6 +278,7 @@
           }
           await agentAct('resume', { run: r.id });
         } }));
+        if (!r.policy && !(r.pause && r.pause.kind === 'question')) buttons.push(S.dom.Button({ label: 'Resume end to end', variant: 'ghost', attrs: { 'data-agent': 'resume-end-to-end' }, onClick: () => endToEnd('Resume end to end', { run: r.id, switchAgent: switching }) }));
         if (r.status === 'paused' || r.interrupted) buttons.push(S.dom.Button({ label: 'Stop agent', variant: 'ghost', attrs: { 'data-agent': 'stop' }, onClick: () => agentAct('stop', { run: r.id, reason: 'stopped from the web workspace' }) }));
       }
       if (buttons.length) children.push(el('div', { class: 'appworks-action' }, buttons));
@@ -287,6 +323,8 @@
         description: 'Workflow stage: ' + p.stage + '. Created by ' + p.createdBy + '.',
         meta: [S.dom.ResourceIdentity({ kind: 'project', id: p.id, length: 24 }), ' ', rev ? S.dom.ResourceIdentity({ kind: 'commit', id: rev.sha }) : null],
       }));
+
+      out.push(el('div', { class: 'appworks-action' }, [S.dom.Button({ label: 'Delete project', variant: 'ghost', attrs: { 'data-action': 'delete' }, onClick: () => deleteProject(p) })]));
 
       // Workflow stages, in the order feltdb.flow declares them.
       out.push(section('workflow', 'Workflow', el('ol', { class: 'appworks-stages' }, v.stages.map((s) => el('li', { class: 'appworks-stage appworks-stage--' + s.state, 'data-stage': s.stage, ...(s.state === 'current' ? { 'aria-current': 'step' } : {}) }, [

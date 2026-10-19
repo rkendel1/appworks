@@ -140,6 +140,11 @@ export class Store {
     return Boolean(result.updated);
   }
 
+  /** Deletes a record (project deletion only; the flow's records are otherwise append-only or version-fenced). */
+  async remove(collection: Collection, id: string): Promise<void> {
+    await this.db.collection(collection).delete(id);
+  }
+
   /** Stores an artifact body under its own sha256 (write to a temporary name, then rename: never a torn file). */
   putArtifactBody(text: string): { fileDigest: string; path: string; bytes: number } {
     const hex = sha256(text);

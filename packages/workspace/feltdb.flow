@@ -87,6 +87,7 @@ app appworks_workspace {
     grantedBy: text?
     consumedAt: datetime?
     consumedBy: text?
+    grantedVia: json?
     index projectId using hash(projectId)
   }
 
@@ -176,6 +177,7 @@ app appworks_workspace {
     leaseExpiresAt: datetime?
     turns: integer
     cancelRequested: boolean?
+    policy: json?
     pause: json?
     outcome: json?
     usage: json?

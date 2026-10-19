@@ -76,7 +76,7 @@ for (const provider of ["anthropic", "openai"] as const) {
       expect(h.calls).toHaveLength(1);
       const body = JSON.parse(h.calls[0]!.body);
       expect(body.model).toBe("test-model");
-      if (provider === "anthropic") expect(body.tool_choice).toEqual({ type: "any", disable_parallel_tool_use: true });
+      if (provider === "anthropic") expect(body.tool_choice).toEqual({ type: "auto", disable_parallel_tool_use: true });
       else expect([body.tool_choice, body.store, body.parallel_tool_calls]).toEqual(["required", false, false]);
       expect(body.tools.map((t: { name: string }) => t.name)).toEqual(["workflow__assess_v1", "workflow__select_v1", "workflow__execute_v1", "ask_person", "finish_run"]);
       // The key is a header, never in the body; the request goes only to the provider's endpoint.

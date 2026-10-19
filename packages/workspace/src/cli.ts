@@ -48,17 +48,17 @@ const USAGE = `usage:
   appworks project list [--json]
   appworks project show <id> [--json]
   appworks project <action> <id> [--<input> <value> ...]      actions: ${ACTIONS.join(" ")}
-  appworks agent run <id> [--agent <provider>] [--model <model>] [--task <text>] [--max-turns <n>] [--no-wait] [--json]
+  appworks agent run <id> [--end-to-end] [--agent <provider>] [--model <model>] [--task <text>] [--max-turns <n>] [--no-wait] [--json]
   appworks agent status <id> [--json]
   appworks agent stop <id> [--reason <text>]
-  appworks agent resume <id> [--answer <text>] [--switch-agent --agent <provider> [--model <model>]] [--no-wait] [--json]
+  appworks agent resume <id> [--end-to-end] [--answer <text>] [--switch-agent --agent <provider> [--model <model>]] [--no-wait] [--json]
   appworks agent check [--agent <provider>] [--model <model>] [--json]
   appworks serve [--port <port>] [--host 127.0.0.1]
   global: [--home <dir>] [--extractions <dir>] [--env-file <path>] (default ./.env.local when present; never printed)`;
 
 class UsageError extends Error {}
 
-const FLAGS = new Set(["json", "switch-agent", "no-wait"]);
+const FLAGS = new Set(["json", "switch-agent", "no-wait", "end-to-end"]);
 
 /**
  * The environment commands read: the process environment over `.env.local` (or `--env-file`), which is optional and

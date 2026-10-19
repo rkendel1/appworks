@@ -190,6 +190,8 @@ export interface ApprovalRecord {
   grantedBy?: string;
   consumedAt?: string;
   consumedBy?: string;
+  /** Set when a person's bounded-run policy granted this, instead of the person deciding this subject themselves. */
+  grantedVia?: { policy: "bounded-run"; run: string; scope: string[]; by: string };
   __version?: number;
 }
 

@@ -92,14 +92,14 @@ export async function performAgent(service: AgentService, principal: Principal, 
       const maxTurns = text("maxTurns") ?? text("max-turns") ?? (typeof input.maxTurns === "number" ? String(input.maxTurns) : undefined);
       if (maxTurns !== undefined && !/^[1-9]\d{0,3}$/.test(maxTurns)) throw new WorkspaceError("INVALID_INPUT", "maxTurns is a positive integer");
       const { agent, limits } = service.make(override);
-      const started = await service.runtime.start(principal, projectId, { agent, ...(text("task") ? { task: text("task")! } : {}), limits: { ...limits, ...(maxTurns ? { maxTurns: Number(maxTurns) } : {}) } });
+      const started = await service.runtime.start(principal, projectId, { agent, ...(flag("endToEnd") || flag("end-to-end") ? { endToEnd: true } : {}), ...(text("task") ? { task: text("task")! } : {}), limits: { ...limits, ...(maxTurns ? { maxTurns: Number(maxTurns) } : {}) } });
       return { kind: "started", ...started };
     }
     case "resume": {
       const runId = await runFor();
       const run = await service.runtime.run(principal, runId);
       if (run.projectId !== projectId) throw new WorkspaceError("NOT_FOUND", `${runId} is not an agent run of ${projectId}`);
-      const started = await service.runtime.resume(principal, runId, { agent: service.make(override).agent, ...(text("answer") ? { answer: text("answer")! } : {}), switchAgent: flag("switchAgent") || flag("switch-agent") });
+      const started = await service.runtime.resume(principal, runId, { agent: service.make(override).agent, ...(text("answer") ? { answer: text("answer")! } : {}), switchAgent: flag("switchAgent") || flag("switch-agent"), ...(flag("endToEnd") || flag("end-to-end") ? { endToEnd: true } : {}) });
       return { kind: "started", ...started };
     }
     case "stop": {

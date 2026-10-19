@@ -1,6 +1,6 @@
 /**
  * The Anthropic adapter: one Messages API call per decision, the request as one user message, one tool per offered
- * action and a forced tool choice. Stateless; no SDK retries (the orchestrator's policy is the only one). The key is
+ * action and an automatic tool choice (some models reject a forced one; a reply without a tool call is `invalid-output`). Stateless; no SDK retries (the orchestrator's policy is the only one). The key is
  * passed in by configuration and never read from the environment by the SDK.
  */
 import Anthropic from "@anthropic-ai/sdk";
@@ -32,7 +32,7 @@ export function anthropicAgent(options: AnthropicAgentOptions): AgentAdapter {
             system: systemPrompt(request),
             messages: [{ role: "user", content: requestPrompt(request) }],
             tools: toolsFor(request).map((t) => ({ name: t.name, description: t.description, input_schema: t.schema as Anthropic.Tool.InputSchema })),
-            tool_choice: { type: "any", disable_parallel_tool_use: true }
+            tool_choice: { type: "auto", disable_parallel_tool_use: true }
           },
           { ...(decide.signal ? { signal: decide.signal } : {}), ...(decide.timeoutMs ? { timeout: decide.timeoutMs } : {}), maxRetries: 0 }
         );

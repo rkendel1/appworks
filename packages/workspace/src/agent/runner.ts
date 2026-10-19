@@ -38,6 +38,15 @@ export const DEFAULT_LIMITS: RunLimits = { maxTurns: 40, decisionTimeoutMs: 120_
 export type AgentRunStatus = "running" | "paused" | "completed" | "blocked" | "exhausted" | "failed" | "cancelled";
 export type Pause = { kind: "approval"; action: string; approval: string; subject?: string; description?: string; turn: number } | { kind: "question"; question: string; options?: string[]; turn: number };
 
+/** What a person can pre-authorise for one run. Only local work: no commit, push, pull request, install, contract or promotion. */
+export const BOUNDED_APPROVALS: readonly string[] = ["generate-files"];
+export interface RunPolicy {
+  kind: "bounded-run";
+  approve: string[];
+  grantedBy: string;
+  grantedAt: string;
+}
+
 export interface AgentRunRecord {
   id: string;
   projectId: string;
@@ -52,6 +61,11 @@ export interface AgentRunRecord {
   leaseExpiresAt?: string;
   turns: number;
   cancelRequested?: boolean;
+  /**
+   * The person's bounded-run policy for THIS run: set only when they start or resume it end to end, never by the agent,
+   * and never widened afterwards. It lets the run grant the listed approvals for the exact subject it paused on.
+   */
+  policy?: RunPolicy;
   pause?: Pause;
   /** How it ended. `claimed` is the agent's own word; `stage` and `condition` are the project's recorded state. */
   outcome?: { reason: string; claimed?: string; rationale?: string; blockers?: string[]; stage: string; condition: string };
@@ -171,7 +185,7 @@ export class AgentRuntime {
   // ---- start, resume, stop ------------------------------------------------------------------------------------
 
   /** Starts an agent run on a project. Refused if another agent run holds it, or a step is running on it. */
-  async start(principal: Principal, projectId: string, input: { agent: AgentAdapter; task?: string; limits?: Partial<RunLimits> }): Promise<StartedAgentRun> {
+  async start(principal: Principal, projectId: string, input: { agent: AgentAdapter; task?: string; limits?: Partial<RunLimits>; endToEnd?: boolean }): Promise<StartedAgentRun> {
     await this.ws.authorize(principal, "agent.run", { project: projectId });
     const p = await this.ws.project(principal, projectId);
     if (p.condition.state === "cancelled") throw new WorkspaceError("PROJECT_CANCELLED", "the project is cancelled; nothing further runs");
@@ -203,7 +217,8 @@ export class AgentRuntime {
       owner: this.worker,
       leaseExpiresAt: new Date(this.now().getTime() + this.leaseMs).toISOString(),
       turns: 0,
-      usage: { inputTokens: 0, outputTokens: 0, decisions: 0 }
+      usage: { inputTokens: 0, outputTokens: 0, decisions: 0 },
+      ...(input.endToEnd ? { policy: { kind: "bounded-run" as const, approve: [...BOUNDED_APPROVALS], grantedBy: principal.id, grantedAt: at } } : {})
     };
     try {
       await this.ws.store.commit([
@@ -222,7 +237,7 @@ export class AgentRuntime {
    * interrupted one (its worker died). A different agent than the run's is refused unless the switch is explicit; an
    * explicit switch is recorded on the run.
    */
-  async resume(principal: Principal, runId: string, input: { agent: AgentAdapter; answer?: string; switchAgent?: boolean }): Promise<StartedAgentRun> {
+  async resume(principal: Principal, runId: string, input: { agent: AgentAdapter; answer?: string; switchAgent?: boolean; endToEnd?: boolean }): Promise<StartedAgentRun> {
     await this.ws.authorize(principal, "agent.run");
     const run = await this.run(principal, runId);
     await this.ws.authorize(principal, "agent.run", { project: run.projectId });
@@ -250,6 +265,7 @@ export class AgentRuntime {
       leaseExpiresAt: new Date(this.now().getTime() + this.leaseMs).toISOString(),
       updatedAt: at,
       agent: { ...identity },
+      ...(input.endToEnd && !run.policy ? { policy: { kind: "bounded-run" as const, approve: [...BOUNDED_APPROVALS], grantedBy: principal.id, grantedAt: at } } : {}),
       ...(switching ? { switches: [...(run.switches ?? []), { at, by: principal.id, from: run.agent, to: { ...identity }, afterTurn: run.turns }] } : {})
     };
     delete next.pause;
@@ -391,8 +407,31 @@ export class AgentRuntime {
       this.fault("after-execute", runId, turnNo);
       const { pause, ...outcome } = result;
       await this.complete(runId, turnNo, outcome.status === "paused" ? "paused" : outcome.status === "succeeded" ? "succeeded" : outcome.status === "failed" ? "failed" : "refused", outcome);
+      if (outcome.status === "paused" && pause?.subject && (await this.grantUnderPolicy(principal, run, pause as { approval: string; subject: string }, decision.action, turnNo))) continue;
       if (outcome.status === "paused") return this.pauseRun(runId, { kind: "approval", action: definition.id, approval: pause?.approval ?? definition.approval ?? "", ...(pause ? { subject: pause.subject, description: pause.description } : {}), turn: turnNo });
     }
+  }
+
+  /**
+   * Grants the approval a paused action needs, but only when the person's policy for this run names it, it is a bounded
+   * local approval, and it has not already been granted for this same subject in this run. The grant goes through
+   * `Workspace.approve`, which re-derives the subject from current evidence and refuses a mismatch, and is recorded as
+   * a policy grant by that person, not as a manual decision. Anything else returns false and the run pauses for a person.
+   */
+  private async grantUnderPolicy(principal: Principal, run: AgentRunRecord, pause: { approval: string; subject: string }, action: string, turnNo: number): Promise<boolean> {
+    const policy = run.policy;
+    if (!policy || policy.kind !== "bounded-run" || !BOUNDED_APPROVALS.includes(pause.approval) || !policy.approve.includes(pause.approval)) return false;
+    const marker = `policy-approved ${pause.approval} ${pause.subject}`;
+    const earlier = (await this.ws.store.list<AgentTurnRecord>("AgentTurn", { runId: run.id })).some((t) => t.turn < turnNo && (t.result?.summary ?? "").includes(marker));
+    if (earlier) return false;
+    try {
+      await this.ws.approve(principal, run.projectId, { action: pause.approval, subject: pause.subject }, { policy: "bounded-run", run: run.id, scope: [...policy.approve], by: policy.grantedBy });
+    } catch {
+      return false;
+    }
+    const turn = await this.ws.store.get<AgentTurnRecord>("AgentTurn", turnId(run.id, turnNo));
+    if (turn) await this.ws.store.update("AgentTurn", turn.id, turn.__version!, this.scrub({ result: { ...(turn.result ?? { status: "paused", class: "none" }), summary: `${turn.result?.summary ?? action} -- ${marker} under ${policy.grantedBy}'s bounded-run policy` } }) as never);
+    return true;
   }
 
   /** One decision, bounded in time, retried only for a retryable failure, never by another agent. */
