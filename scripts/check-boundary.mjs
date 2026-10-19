@@ -17,6 +17,13 @@
 //    on @appport/core, @appport/sdk or Distribution Protocol; nothing depends on it from below (assessment, recipe).
 //    Its source has no code-execution or network primitive, and only its CLI writes a file. Adapters live in private
 //    packages under extractions/, are never shipped, and pin AppPort exactly.
+// 8. @appport/workspace (the project workspace and orchestrator; private, not published) depends at run time only on
+//    @appport/assessment, @appport/extraction, @appport/protocol, @appport/client (discovery), @appport/github (the
+//    stack's GitHub integration) and @feltdb/core (its only durable state), all published ones at exact versions; never
+//    on @appport/core, @appport/services or a second database or scheduler. @appport/sdk is a test-only dependency (a
+//    real application to discover). Processes run in two places only: git, against the isolated checkout
+//    (src/repository.ts), and the approved extraction runner (src/runner.ts); only src/server.ts serves HTTP. Its schema
+//    and workflow are its feltdb.flow, and nothing below it (assessment, extraction, recipe) depends on it.
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -79,6 +86,33 @@ else {
 for (const lower of ["@appport/assessment", "@appport/recipe", "@appport/recipe-distribution"]) {
   const m = byName[lower]?.manifest;
   if (m && "@appport/extraction" in { ...m.dependencies, ...m.peerDependencies, ...m.devDependencies }) fail(`${lower} depends on @appport/extraction; extraction consumes assessments, never the reverse`);
+}
+const workspace = byName["@appport/workspace"];
+if (workspace) {
+  const allowed = new Set(["@appport/assessment", "@appport/extraction", "@appport/protocol", "@appport/client", "@appport/github", "@feltdb/core"]);
+  for (const [name, spec] of Object.entries({ ...workspace.manifest.dependencies, ...workspace.manifest.peerDependencies })) {
+    if (!allowed.has(name)) fail(`@appport/workspace depends on ${name}; it may depend only on ${[...allowed].join(", ")}`);
+    if (!byName[name] && !/^\d+\.\d+\.\d+$/.test(spec)) fail(`@appport/workspace depends on ${name}@${spec}; published dependencies are exact versions`);
+  }
+  for (const name of Object.keys({ ...workspace.manifest.devDependencies })) if (name !== "@appport/sdk") fail(`@appport/workspace has devDependency ${name}; only @appport/sdk (a real application for discovery tests) is allowed`);
+  if (workspace.manifest.private !== true) fail("@appport/workspace must be private: it is an application, and @appport/github brings a second AppPort stack a published library must not");
+  if (!workspace.manifest.files?.includes("feltdb.flow")) fail("@appport/workspace must ship its feltdb.flow");
+  try {
+    if (!/^flow_version 1\b/m.test(read(`${workspace.dir}/feltdb.flow`))) fail("packages/workspace/feltdb.flow is not a flow_version 1 FeltDB flow");
+  } catch {
+    fail("packages/workspace/feltdb.flow is missing");
+  }
+  for (const file of walk(`${workspace.dir}/src`).filter((f) => f.endsWith(".ts"))) {
+    const text = read(file);
+    if (/\beval\s*\(|new\s+Function\s*\(|node:vm\b|\bimport\s*\(\s*[^"'@\s]/.test(text)) fail(`${file} contains a code-evaluation primitive`);
+    if (/child_process/.test(text) && !/\/src\/(repository|runner)\.ts$/.test(file)) fail(`${file} runs processes; only src/repository.ts (git) and src/runner.ts (the approved runner) may`);
+    if (/node:(?:http|https|http2|net|tls|dgram)\b/.test(text.replace(/import type[^;]*;/g, "")) && !file.endsWith("/src/server.ts")) fail(`${file} opens network connections or servers; only src/server.ts serves HTTP (discovery goes through @appport/client, GitHub through @appport/github)`);
+    if (/["']@appport\/services["']|["']express["']|createFeltDB\(/.test(text) && !file.endsWith("/src/store.ts")) fail(`${file} opens another store or service runtime; FeltDB is opened in src/store.ts only`);
+  }
+}
+for (const lower of ["@appport/assessment", "@appport/extraction", "@appport/recipe", "@appport/recipe-distribution"]) {
+  const m = byName[lower]?.manifest;
+  if (m && "@appport/workspace" in { ...m.dependencies, ...m.peerDependencies, ...m.devDependencies }) fail(`${lower} depends on @appport/workspace; the workspace consumes them, never the reverse`);
 }
 for (const dir of readdirSync(join(root, "extractions"))) {
   const manifest = json(`extractions/${dir}/package.json`);

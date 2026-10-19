@@ -11,7 +11,8 @@ export default defineConfig({
       "@appport/assessment": r("./packages/assessment/src/index.ts"),
       "@appport/extraction": r("./packages/extraction/src/index.ts"),
       "@appport/recipe": r("./packages/recipe/src/index.ts"),
-      "@appport/recipe-distribution": r("./packages/recipe-distribution/src/index.ts")
+      "@appport/recipe-distribution": r("./packages/recipe-distribution/src/index.ts"),
+      "@appport/workspace": r("./packages/workspace/src/index.ts")
     }
   },
   test: {

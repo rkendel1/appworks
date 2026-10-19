@@ -1,0 +1,50 @@
+{
+  "name": "@appport/workspace",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AppWorks project workspace and transformation orchestrator: one durable, FeltDB-backed workflow from a pinned repository revision through discovery, assessment, reconciliation, extraction and verification, with approvals enforced at each action boundary. Served as a web workspace and through the appworks CLI.",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rkendel1/appworks.git",
+    "directory": "packages/workspace"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "ui",
+    "vendor/stack-ui",
+    "feltdb.flow",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "tsc -b --clean"
+  },
+  "dependencies": {
+    "@appport/assessment": "workspace:*",
+    "@appport/client": "1.1.3",
+    "@appport/extraction": "workspace:*",
+    "@appport/github": "1.0.2",
+    "@appport/protocol": "1.2.0",
+    "@feltdb/core": "0.12.0"
+  },
+  "bin": {
+    "appworks": "./dist/cli.js"
+  },
+  "devDependencies": {
+    "@appport/sdk": "1.2.2"
+  }
+}

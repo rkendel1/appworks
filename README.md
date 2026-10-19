@@ -20,7 +20,8 @@ discoverable and invocable through canonical capability contracts, and uses
 
 **Draft.** This repository contains the recipe source model, its validation, dependency locks, source packages, the boundary with
 Distribution Protocol, the first existing-application assessment (Go and Protocol Buffers), and the first capability extraction
-(read-only operations, exposed through the application's existing AppPort boundary). There is **no compiler, no runtime, no publishing or
+(read-only operations, exposed through the application's existing AppPort boundary), and the project workspace that carries a pinned
+revision through them with durable state, approvals and verification. There is **no compiler, no runtime, no publishing or
 acquisition, no source extraction and no migration** yet: nothing here executes a recipe, rewrites an application or establishes a
 business outcome; an assessment verifies nothing, and an extraction verifies only the behaviors it records as passed. See the charter's
 status table.
@@ -34,6 +35,7 @@ Published under the `@appport/*` ecosystem scope; owned, versioned and released 
 | [`@appport/recipe`](packages/recipe) | recipe source model, expressions, validation, locks, packages, JSON Schemas | `@appport/protocol` 1.2.0, `@appport/schema` 1.1.1, `@appport/integration` 1.2.0 (published); tested against `@appport/core` 1.3.0 |
 | [`@appport/recipe-distribution`](packages/recipe-distribution) | recipe package ↔ `distribution/1` release manifest; acceptance of acquired bytes | `@appport/recipe`, `@distribution-protocol/protocol` 1.0.0 |
 | [`@appport/assessment`](packages/assessment) | static assessment of an existing repository: evidence, capability candidates, readiness, a recommended exposure candidate (`appworks-assess`) | `@appport/protocol` 1.2.0 |
+| [`@appport/workspace`](packages/workspace) | the project workspace and orchestrator (private, not published): FeltDB-backed workflow from a pinned revision to a verified extraction, web workspace and `appworks project` / `appworks serve` | `@appport/extraction`, `@appport/assessment`, `@appport/client` 1.1.3, `@appport/github` 1.0.2, `@appport/protocol` 1.2.0, `@feltdb/core` 0.12.0 |
 | [`@appport/extraction`](packages/extraction) | extraction artifacts: eligibility, contract and mapping checks, adapter identity, fulfillment declarations, per-behavior verification records, revision rules; the `appworks` CLI | `@appport/assessment`, `@appport/protocol` 1.2.0, `@appport/schema` 1.1.1 |
 
 Adapters and their verification suites live in private, unpublished packages under [`extractions/`](extractions).
@@ -77,6 +79,10 @@ pnpm release:check    # pack, install outside the repository from the registry, 
 verifies the extraction's declaration and behaviors against it, requires `extractions/memos-reactions/revisions/2/extraction.json` to
 reproduce and every known adapter defect to be caught. CI does both in
 its `memos` job (Go from the checkout's `go.mod`).
+
+`APPWORKS_MEMOS_E2E=1 APPWORKS_MEMOS_REPO=<checkout> pnpm vitest run packages/workspace/test/memos-e2e.test.ts` runs the same Memos
+through the project workspace end to end (acquisition through `@appport/github`, discovery of the running bridge, assessment,
+reconciliation, approval, the extraction runner, verification); `appworks serve` shows the result.
 
 No AppPort checkout is needed: AppPort and Distribution Protocol come from the npm registry at the versions the package manifests pin.
 
