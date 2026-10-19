@@ -24,31 +24,38 @@ The formats keep the names they were drafted under (`appport.recipe/1`, …). `a
 part of the AppPort protocol, which neither defines nor reads them (`docs/architecture.md` §2). They were never released by AppPort, so moving
 their implementation here changes no installed base.
 
-## 3. AppPort APIs used before they are published
+## 3. AppPort versions and APIs
 
-AppWorks builds against **published** AppPort 1.1.0. The canonical-capability work is merged on AppPort `main` (rkendel1/appport#276,
-#277) but not released. Until it is, `packages/recipe/src/appport-compat.ts` holds the minimum AppWorks needs from it, and nothing else:
+AppWorks consumes the **published** AppPort canonical-capability release, at exact versions:
 
-| Item in `appport-compat.ts` | Defined by (AppPort `main`) | Replace with, once published |
-|---|---|---|
-| `CANONICAL_CONTRACT_EXTENSION`, `isCanonicalContract` | AppPort `fulfillment-1` §2 | the same exports of `@appport/protocol` |
-| `CanonicalDependencyTarget`, `RecipeDependency`, `isCanonicalDependencyTarget` | AppPort `dependencies-1` §3, canonical targets | `Dependency`, `CanonicalDependencyTarget`, `isCanonicalDependencyTarget` |
-| `lintCanonicalDependencies` | the canonical-target branch of `lintIntegration` | `lintIntegration` on a manifest carrying the dependencies |
-| `FulfillmentStatus` | AppPort `fulfillment-1` §4 | `FulfillmentStatus` |
+| Package | Version | Used by | For |
+|---|---|---|---|
+| `@appport/protocol` | 1.2.0 | `@appport/recipe` | `Dependency` and `CanonicalDependencyTarget`, `isCanonicalDependencyTarget`, `lintIntegration`, `isCanonicalContract`, `compareSchemas`, `FulfillmentClaim`, `FulfillmentStatus`, digests, pointers, versions |
+| `@appport/schema` | 1.1.1 | `@appport/recipe` | input validation (`fromJSONSchema`); pinned to the version `@appport/integration` 1.2.0 pins, so one copy is installed |
+| `@appport/integration` | 1.2.0 | `@appport/recipe` | `lintRule`, `requiredTargetsNotProduced`, `Rule` |
+| `@appport/core` | 1.3.0 | tests only (`devDependency`) | real canonical contracts, discovery, resolution, `resolvedDependency()`, bindings, grants and invocation in `canonical-resolution.test.ts` and the release check |
 
-And two adapters over published APIs that can become direct calls:
+`@appport/recipe` does not depend on `@appport/core` at run time: `createRecipeLock` takes `resolvedDependency()` records from whoever resolved
+them, and `ResolvedDependencyRecord` is the part of that record it reads. The tests check, at compile time and against installed artifacts,
+that core's published `ResolvedDependency` satisfies it.
 
-| Adapter | Uses today | Direct call once published |
-|---|---|---|
-| `rules.ts` (`lintRecipeRules`) | `lintMapping`, rule by rule, on a synthetic source record | `lintRule` (`@appport/integration`, merged on `main`) |
-| `interfaceChanges` in `validate.ts` | `compareManifests` on single-capability manifests | `compareSchemas` (`@appport/protocol`, merged on `main`) |
+**Removed in this release of the AppWorks packages** (they existed only while the AppPort API was unpublished):
 
-Each replacement is a patch-level change if behavior is identical, which the existing tests check (`schemas.test.ts` asserts the rule adapter
-reports exactly what `lintMapping` reports).
+| Removed | Replaced by |
+|---|---|
+| `appport-compat.ts`: `CANONICAL_CONTRACT_EXTENSION`, `isCanonicalContract` | the same exports of `@appport/protocol` 1.2.0 |
+| `appport-compat.ts`: `CanonicalDependencyTarget`, `RecipeDependency`, `isCanonicalDependencyTarget` | `Dependency`, `CanonicalDependencyTarget`, `isCanonicalDependencyTarget` of `@appport/protocol` |
+| `appport-compat.ts`: `lintCanonicalDependencies` | `lintIntegration`, which checks canonical targets |
+| `appport-compat.ts`: `FulfillmentStatus` | `FulfillmentStatus` of `@appport/protocol` |
+| `rules.ts`: `lintRecipeRules` (a `lintMapping` adapter) | `lintRule` and `requiredTargetsNotProduced` of `@appport/integration` |
+| `interfaceChanges` (a `compareManifests` adapter) | `compareSchemas` of `@appport/protocol` |
 
-Not used at all yet, because not published: AppPort `@appport/core`'s canonical discovery, `resolvedDependency()` and canonical bindings.
-`createRecipeLock` reads `resolvedDependency()` records structurally (`ResolvedDependencyRecord`) and is tested against their documented
-shape; once `@appport/core` publishes them, add a test that feeds real records (the AppPort branch had one: see §5).
+No gap remains: every check AppWorks needed is published. These were exports of an unreleased `@appport/recipe` 0.1.0, so nothing published
+changes. Validation behavior is unchanged; all source, lock and package tests pass against the published APIs.
+
+**Known AppPort limitations that apply to recipe environments** (AppPort `fulfillment-1` §7): authority equivalence decisions are supplied to
+the resolver, not stored, so a binding is not revalidated when they change; the synchronous withdrawal fence that refuses a stale binding
+before execution is per registry instance, so another process sharing a store sees a revision on its next authority read.
 
 ## 4. Evolution rules
 
@@ -69,12 +76,12 @@ The recipe model was first written on AppPort branch `claude/canonical-capabilit
 | At `fe35f4f` (AppPort) | Here |
 |---|---|
 | `packages/integration/src/recipe.ts`, `recipe-expression.ts`, `recipe-validate.ts`, `recipe-lock.ts`, `recipe-package.ts` | `packages/recipe/src/source.ts`, `expression.ts`, `validate.ts`, `lock.ts`, `package.ts` |
-| calls to unpublished `lintRule`, `requiredTargetsNotProduced`, `schemaTypes`, `compareSchemas`, `lintIntegration` (canonical targets) | published `lintMapping` / `compareManifests` through `rules.ts` and `interfaceChanges`; `appport-compat.ts` (§3) |
+| calls to `lintRule`, `requiredTargetsNotProduced`, `schemaTypes`, `compareSchemas`, `lintIntegration` (canonical targets) | the same published calls (§3), except `schemaTypes`, now a local helper in `expression.ts`; adapters used before AppPort 1.2.0 are removed |
 | `spec/recipe-1.md`, `spec/schemas/recipe*.schema.json` | `spec/recipe-1.md`, `packages/recipe/schemas/` |
 | `examples/supplier-invoice-recipe/` | `examples/supplier-invoice/` |
 | `packages/integration/test/recipe*.ts` | `packages/recipe/test/` (same cases) |
-| `spec/test/recipe-contract.test.ts` | schema alignment: `packages/recipe/test/schemas.test.ts`; tests over real `@appport/core` resolution: pending its release (§3) |
+| `spec/test/recipe-contract.test.ts` | schema alignment: `packages/recipe/test/schemas.test.ts`; locks, substitution and bindings over real `@appport/core` resolution: `packages/recipe/test/canonical-resolution.test.ts` |
 
-Semantics are unchanged: the same 62 source, lock and package test cases (44 + 18) pass against published AppPort.
+Semantics are unchanged. Lock cases that needed a resolution, which once used hand-built records, now run against real AppPort resolution.
 
 The generic part of that commit, extracting `lintRule` from `lintMapping`, is an AppPort integration primitive and stays in AppPort.

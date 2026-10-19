@@ -1,14 +1,14 @@
 /**
  * The published JSON Schemas (shipped in the package, `schemas/`) stay aligned with what the implementation produces,
- * and the recipe rule checks are AppPort's mapping lint, unchanged.
+ * and the recipe's rule checks are AppPort's published `lintRule`.
  */
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import type { AppPortManifest, JSONSchema } from "@appport/protocol";
+import { isRequiredAt, schemaAt, type JSONSchema } from "@appport/protocol";
 import { fromJSONSchema } from "@appport/schema";
-import { lintMapping, schemaIdentity, type MappingArtifact, type Rule } from "@appport/integration";
-import { createRecipeLock, createRecipePackage, lintRecipeRules } from "../src/index.js";
+import { lintRule, type RuleEndpoint } from "@appport/integration";
+import { createRecipeLock, createRecipePackage, validateRecipe, type CapabilityStep } from "../src/index.js";
 import { CONTRACT, accountingContract, example } from "./fixtures.js";
 
 const schema = (name: string) => fromJSONSchema(JSON.parse(readFileSync(fileURLToPath(new URL(`../schemas/${name}`, import.meta.url)), "utf8")) as JSONSchema);
@@ -41,48 +41,22 @@ describe("schema alignment", () => {
   });
 });
 
-describe("recipe rules are checked by AppPort's mapping lint, unchanged", () => {
-  const source: JSONSchema = {
-    type: "object",
-    required: ["minutes", "status"],
-    properties: { minutes: { type: "number", "x-appport-unit": "min" }, status: { type: "string", enum: ["open", "closed"] }, note: { type: "string" } }
-  };
-  const target: JSONSchema = {
-    type: "object",
-    required: ["hours", "state", "note", "count"],
-    properties: { hours: { type: "number", "x-appport-unit": "h" }, state: { type: "string", enum: ["OPEN", "DONE"] }, note: { type: "string" }, count: { type: "integer" }, extra: { type: "boolean" } }
-  };
-  const rules: Rule[] = [
-    { op: "copy", from: "/minutes", to: "/hours" },
-    { op: "enum", from: "/status", to: "/state", table: { open: "OPEN", closed: "CLOSED" }, relation: "exact", unmapped: "reject" },
-    { op: "copy", from: "/note", to: "/note" },
-    { op: "const", to: "/extra", value: "yes" }
-  ];
+describe("recipe rules are checked by AppPort's lintRule", () => {
+  it("a recipe's mapping findings are exactly what the published lintRule reports for the same rule", () => {
+    const recipe = example();
+    const submit = recipe.steps.find((st) => st.id === "submit") as CapabilityStep;
+    const rule = { op: "copy", from: "/input/supplierId", to: "/amount" } as const;
+    submit.input[2] = rule;
+    const fromRecipe = validateRecipe(recipe).findings.filter((f) => f.path.startsWith("/steps/5/input/2")).map((f) => f.message);
 
-  it("reports, per rule, exactly what lintMapping reports for the same rules between the same schemas", () => {
-    const manifest = (id: string, side: "input" | "output", record: JSONSchema): AppPortManifest => {
-      const d = { version: 1, kind: "request", inputSchema: side === "input" ? record : { type: "object" }, outputSchema: side === "output" ? record : { type: "object" }, authorization: [] };
-      return { protocol: "appport/1", application: { id, name: id, version: "1.0.0" }, capabilities: [{ name: "x.y", versions: [1], latestVersion: 1, ...d, definitions: [d] }], events: [], transports: [] } as never;
+    const direct: string[] = [];
+    const source: RuleEndpoint = (pointer) => (pointer === rule.from ? { schema: recipe.inputs.properties!["supplierId"]!, required: true } : undefined);
+    const target: RuleEndpoint = (pointer) => {
+      const node = schemaAt(submit.expects.input, pointer);
+      return node ? { schema: node, required: isRequiredAt(submit.expects.input, pointer) } : undefined;
     };
-    const mapping = {
-      format: "appport.mapping/1", kind: "declarative", id: "urn:test", version: 1, origin: "provider",
-      from: { application: "com.example.a", capability: "x.y@1", side: "output", schemaDigest: schemaIdentity(source) },
-      to: { application: "com.example.b", capability: "x.y@1", side: "input", schemaDigest: schemaIdentity(target) },
-      rules, lossy: [], vectors: []
-    } as unknown as MappingArtifact;
-    const direct = lintMapping(mapping, { from: manifest("com.example.a", "output", source), to: manifest("com.example.b", "input", target) }, { requireConcepts: false })
-      .filter((i) => i.path.startsWith("rules"))
-      .map((i) => [i.level, i.message]);
-    const sources = rules.map((r) => (r.op === "const" ? undefined : { schema: source.properties![r.from.slice(1)]!, required: source.required!.includes(r.from.slice(1)) }));
-    const adapted = lintRecipeRules(rules, sources, target).map((i) => [i.level, i.message]);
-    expect(adapted).toEqual(direct);
-    // And the findings are the substantive ones: a unit copy, an enum value, an optional source, a constant, a missing field.
-    expect(adapted.map(([, m]) => m)).toEqual(expect.arrayContaining([
-      expect.stringMatching(/copy between different units \(min → h\)/),
-      expect.stringMatching(/"CLOSED" is not a declared value of \/state/),
-      expect.stringMatching(/\/note is optional but \/note is required/),
-      "the constant is not allowed by the target schema",
-      "required target field /count is not produced by any rule"
-    ]));
+    lintRule(rule, "rules[0]", { source, target }, { requireConcepts: false, lossFor: () => false }, (_p, m) => direct.push(m), (_p, m) => direct.push(m));
+    expect(fromRecipe).toEqual(direct);
+    expect(direct.join()).toMatch(/copy between incompatible types \(string → number\)/);
   });
 });

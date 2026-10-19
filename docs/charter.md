@@ -38,7 +38,7 @@ one designed for a new application are the same kind of thing, fulfilled, resolv
 | Area | Status |
 |---|---|
 | Recipe source model, expressions, validation (`@appport/recipe`) | implemented, draft format `appport.recipe/1` |
-| Dependency locks and source packages (`@appport/recipe`) | implemented, draft formats `appport.recipe-lock/1`, `appport.recipe-package/1` |
+| Dependency locks and source packages (`@appport/recipe`) | implemented, draft formats `appport.recipe-lock/1`, `appport.recipe-package/1`; locks built from real AppPort resolution (`@appport/core` 1.3.0) |
 | Distribution boundary: release manifest, acceptance of acquired bytes (`@appport/recipe-distribution`) | implemented against `@distribution-protocol/protocol` 1.0.0 |
 | Publishing and acquisition (registries, fetching, receipts) | **not implemented** |
 | Recipe compiler | **not implemented** |

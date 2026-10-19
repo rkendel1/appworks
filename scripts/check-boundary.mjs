@@ -3,7 +3,8 @@
 // listing every instance.
 //
 // 1. @appport/recipe depends only on the published AppPort protocol, schema and integration packages: never on
-//    Distribution Protocol, a registry, or the AppPort runtime (@appport/core).
+//    Distribution Protocol, a registry, or the AppPort runtime (@appport/core), which may be a devDependency for tests
+//    against real resolution and binding, and is never imported by shipped source.
 // 2. Only @appport/recipe-distribution depends on @distribution-protocol/*.
 // 3. AppPort packages are consumed as published, exact versions: no workspace:, link:, file: or git dependency on them,
 //    and no import, path alias or project reference into a sibling AppPort checkout.
@@ -43,8 +44,11 @@ for (const { dir, manifest } of packages) {
   for (const [name, spec] of Object.entries(deps)) {
     if (name.startsWith("@distribution-protocol/") && manifest.name !== "@appport/recipe-distribution") fail(`${manifest.name} depends on ${name}; only @appport/recipe-distribution may`);
     if (APPPORT_UPSTREAM.includes(name) && !/^\d+\.\d+\.\d+$/.test(spec)) fail(`${manifest.name} depends on ${name}@${spec}; AppPort packages are consumed as exact published versions`);
-    if (APPPORT_UPSTREAM.includes(name) && name === "@appport/core") fail(`${manifest.name} depends on @appport/core; AppWorks reads core's records structurally`);
   }
+  // The AppPort runtime is a test-only dependency: real resolution and binding in tests, never in what is shipped.
+  const runtime = { ...manifest.dependencies, ...manifest.peerDependencies };
+  if ("@appport/core" in runtime) fail(`${manifest.name} depends on @appport/core at run time; it may only be a devDependency (tests)`);
+  const shipped = { ...runtime };
   for (const file of walk(`${dir}/src`).filter((f) => f.endsWith(".ts"))) {
     const text = read(file);
     const specifiers = [
@@ -59,7 +63,7 @@ for (const { dir, manifest } of packages) {
       }
       const name = specifier.startsWith("@") ? specifier.split("/").slice(0, 2).join("/") : specifier.split("/")[0];
       if (name.startsWith("node:")) continue;
-      if (!(name in deps) && name !== manifest.name) fail(`${file} imports ${name}, which ${manifest.name} does not declare`);
+      if (!(name in shipped) && name !== manifest.name) fail(`${file} imports ${name}, which ${manifest.name} does not declare as a runtime dependency`);
       if (name.startsWith("@distribution-protocol/") && manifest.name !== "@appport/recipe-distribution") fail(`${file} imports ${name}`);
     }
     if (manifest.name === "@appport/recipe" && /\beval\s*\(|new\s+Function\s*\(|child_process|node:vm\b|\bimport\s*\(/.test(text)) fail(`${file} contains a code-execution primitive; recipes are data`);

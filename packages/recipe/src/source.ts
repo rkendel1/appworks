@@ -13,13 +13,12 @@
  * Reused, not reinvented:
  * - schemas are JSON Schema with `x-appport-*` semantic annotations, as everywhere in AppPort;
  * - dependencies are `Dependency` values with a canonical target (AppPort `dependencies-1` §3);
- * - data transformations use the `appport.mapping/1` rule vocabulary, checked by AppPort's own `lintMapping` (./rules.ts);
+ * - data transformations use the `appport.mapping/1` rule vocabulary, checked by AppPort's `lintRule`;
  * - verification and preconditions use the `appport.integration/1` state-verification model (`StateExpectation`,
  *   `ValueRef`), with a probe named by a declared dependency instead of a local capability.
  */
-import type { EffectDescriptor, JSONSchema, StateExpectation, ValueRef } from "@appport/protocol";
+import type { Dependency, EffectDescriptor, JSONSchema, StateExpectation, ValueRef } from "@appport/protocol";
 import type { Rule } from "@appport/integration";
-import type { RecipeDependency } from "./appport-compat.js";
 import type { Expression } from "./expression.js";
 
 export const RECIPE_FORMAT = "appport.recipe/1" as const;
@@ -52,7 +51,7 @@ export interface RecipeSource {
   /** The final business outcome and how it is verified independently of any step's response. */
   outcome: RecipeOutcome;
   /** Canonical capabilities the recipe depends on. Application targets are not allowed. */
-  requires: RecipeDependency[];
+  requires: Dependency[];
   /** The first step. */
   start: string;
   steps: RecipeStep[];

@@ -21,14 +21,18 @@ importers:
   packages/recipe:
     dependencies:
       '@appport/integration':
-        specifier: 1.1.0
-        version: 1.1.0
+        specifier: 1.2.0
+        version: 1.2.0
       '@appport/protocol':
-        specifier: 1.1.0
-        version: 1.1.0
+        specifier: 1.2.0
+        version: 1.2.0
       '@appport/schema':
-        specifier: 1.1.0
-        version: 1.1.0
+        specifier: 1.1.1
+        version: 1.1.1
+    devDependencies:
+      '@appport/core':
+        specifier: 1.3.0
+        version: 1.3.0
 
   packages/recipe-distribution:
     dependencies:
@@ -41,16 +45,24 @@ importers:
 
 packages:
 
-  '@appport/integration@1.1.0':
-    resolution: {integrity: sha512-gManPFugFcatNQ1g4/MSp9ZnAzi4mse/PgJKjKfkvHkizaSuabuspOSRyQDBi4Wq5GZWYLa+U8xbHj6W9l8LUQ==}
+  '@appport/authorization@1.0.5':
+    resolution: {integrity: sha512-3031zzfWFUW+MovwzD2Qash/em1hyUI8lGHzQa0a2jJYPbe6MAv31x781VGZ8vlYTSototS1M6+QbmVnlHbo1g==}
     engines: {node: '>=20'}
 
-  '@appport/protocol@1.1.0':
-    resolution: {integrity: sha512-g6yEh2a1uLbKueiqugWTz5T2TgyPAZLXjf/tgF21nWMby+X7PeFQob+QrFV3kIVZ/MziH0yf+1HjOt9fHosf4A==}
+  '@appport/core@1.3.0':
+    resolution: {integrity: sha512-Zw2CBOAzhq6ISXKHH/Nfy1pm5R5oL2goH+IYrPkBonreWHMADT/dzc2oJfHw5eD89uUr76yp4t2F/ZiHQFAfoQ==}
     engines: {node: '>=20'}
 
-  '@appport/schema@1.1.0':
-    resolution: {integrity: sha512-DPHye1bfgDd5bWEi8+ldI9IqhTymjGzkNmK1wnkGiwW52CMd5AVOz4sPXLIn7IjSpAzHRe8mz/6X5BTSMt60hw==}
+  '@appport/integration@1.2.0':
+    resolution: {integrity: sha512-7lj5YLiRepLsfiYzrvJpPHPpXWY5bE6AcPxYEOdyB/jK0IKjs+KYn6KffkdBQ+Ir1DHNcPH0oBLmBaZRexO3PQ==}
+    engines: {node: '>=20'}
+
+  '@appport/protocol@1.2.0':
+    resolution: {integrity: sha512-zvJMFVQ6ZsBbvwuA0lfF/DEGAMz5LOR4UConUg1yCe+3ZNqRamhqNbEFxDfAsqYLPy8QGQK1q+s/rwg46y64dw==}
+    engines: {node: '>=20'}
+
+  '@appport/schema@1.1.1':
+    resolution: {integrity: sha512-CGoeza3LHNQvs/ghBkAp1owPLSqiITixiXwTAyMdrrg3IEYDpjRfNXifX3zucWy6IQQYkXzeLqdcWZxCZOCRqA==}
     engines: {node: '>=20'}
 
   '@distribution-protocol/protocol@1.0.0':
@@ -626,16 +638,26 @@ packages:
 
 snapshots:
 
-  '@appport/integration@1.1.0':
+  '@appport/authorization@1.0.5':
     dependencies:
-      '@appport/protocol': 1.1.0
-      '@appport/schema': 1.1.0
+      '@appport/protocol': 1.2.0
 
-  '@appport/protocol@1.1.0': {}
-
-  '@appport/schema@1.1.0':
+  '@appport/core@1.3.0':
     dependencies:
-      '@appport/protocol': 1.1.0
+      '@appport/authorization': 1.0.5
+      '@appport/protocol': 1.2.0
+      '@appport/schema': 1.1.1
+
+  '@appport/integration@1.2.0':
+    dependencies:
+      '@appport/protocol': 1.2.0
+      '@appport/schema': 1.1.1
+
+  '@appport/protocol@1.2.0': {}
+
+  '@appport/schema@1.1.1':
+    dependencies:
+      '@appport/protocol': 1.2.0
 
   '@distribution-protocol/protocol@1.0.0': {}
 
