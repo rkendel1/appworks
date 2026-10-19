@@ -15,11 +15,22 @@
  * invalid claim eligible, and a provider can change only through {@link substituteProvider}, which re-checks the
  * canonical identity and requires a valid fulfillment.
  *
- * It is built from `resolvedDependency()` records of `@appport/core` (AppPort `fulfillment-1` §5.2), read
- * structurally: AppWorks does not depend on the runtime.
+ * It is built from the `resolvedDependency()` records of `@appport/core` (AppPort `fulfillment-1` §5.2) that the caller's
+ * resolution produced. This package does not depend on the runtime: it reads the part of the record it needs.
  */
-import { capabilityDigest, contractDigest, digestOf, parseDependencyRef, satisfiesVersionConstraint, type AppPortManifest, type JsonValue } from "@appport/protocol";
-import { isCanonicalContract, isCanonicalDependencyTarget, type FulfillmentStatus, type RecipeDependency as Dependency } from "./appport-compat.js";
+import {
+  capabilityDigest,
+  contractDigest,
+  digestOf,
+  isCanonicalContract,
+  isCanonicalDependencyTarget,
+  parseDependencyRef,
+  satisfiesVersionConstraint,
+  type AppPortManifest,
+  type Dependency,
+  type FulfillmentClaim,
+  type FulfillmentStatus
+} from "@appport/protocol";
 import type { RecipeSource } from "./source.js";
 
 export const RECIPE_LOCK_FORMAT = "appport.recipe-lock/1" as const;
@@ -65,15 +76,15 @@ export interface RecipeLock {
   dependencies: RecipeLockEntry[];
 }
 
-/** `@appport/core`'s `ResolvedDependency`, read structurally. */
+/** The part of `@appport/core`'s `ResolvedDependency` a lock reads; core's published record satisfies it. */
 export interface ResolvedDependencyRecord {
   dependency: Dependency;
   target:
     | { kind: "canonical"; contract: string; contractRevision: number; contractDigest: string; capability: string; version: number; capabilityDigest: string; versionConstraint: string }
     | { kind: "application"; capability: string; versionConstraint: string; application?: string };
   provider: { application: string; registrationId: string; fingerprint: string; revision: number; capability: { name: string; version: number } };
-  /** `claim` is AppPort's `FulfillmentClaim`; the lock only records its digest. */
-  fulfillment?: { claim: JsonValue; status: FulfillmentStatus; compatible: boolean };
+  /** The lock records only the claim's digest. */
+  fulfillment?: { claim: FulfillmentClaim; status: FulfillmentStatus; compatible: boolean };
 }
 
 export class RecipeLockError extends Error {

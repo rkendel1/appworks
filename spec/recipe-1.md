@@ -36,17 +36,19 @@ environment (AppPort `fulfillment-1` §5); the recipe does not change when an im
 ```
 @appport/recipe-distribution ──→ @appport/recipe ──→ @appport/integration ──→ @appport/protocol
             │                          │      └────→ @appport/schema ───────────────↗
-            └──→ @distribution-protocol/protocol    ┆ reads @appport/core's resolvedDependency() records structurally; no import
+            └──→ @distribution-protocol/protocol    ┆ locks are built from @appport/core's resolvedDependency() records;
+                                                     ┆ core is the caller's (and the tests'), never a runtime dependency
 ```
 
 `@appport/recipe` depends only on published AppPort packages, and never on `@appport/core`, Distribution Protocol or a registry. Only
 `@appport/recipe-distribution` depends on Distribution Protocol. AppPort depends on none of these. `scripts/check-boundary.mjs` enforces it.
 
-**Reuse.** Rules are checked by AppPort's mapping lint (`lintMapping`), interfaces by its evolution rules (`compareManifests`), schemas
-by its semantic-annotation checks, digests by `digestOf`, `contractDigest` and `capabilityDigest`, versions by its version constraints. The
-canonical-capability additions to AppPort (the canonical-contract marker and the canonical dependency target) are merged on AppPort `main` but
-not yet published; the few wire-format checks AppWorks needs from them are isolated in `packages/recipe/src/appport-compat.ts` until they
-are (`docs/compatibility.md` §3).
+**AppPort owns canonical validation and resolution.** AppWorks builds on the published `@appport/protocol` 1.2.0, `@appport/schema`
+1.1.1 and `@appport/integration` 1.2.0, and is tested against `@appport/core` 1.3.0. Dependency declarations, including canonical targets,
+are checked by `lintIntegration`; rules by `lintRule` and `requiredTargetsNotProduced`; interfaces by `compareSchemas`; contracts are
+recognized by `isCanonicalContract`; digests are `contractDigest` and `capabilityDigest`. Discovery, fulfillment evaluation, resolution and
+binding are AppPort's (`discoverCanonical`, `evaluateFulfillment`, `resolveRequirement`, `resolvedDependency()`, `CapabilityBinder`): a
+recipe environment uses them directly, and AppWorks re-implements none of them.
 
 ## 3. Source model (`appport.recipe/1`)
 
@@ -83,7 +85,7 @@ available along `unanswered`.
 
 `requires` holds `Dependency` values (AppPort `dependencies-1` §3) with a **canonical target** `{ contract, capability, provider? }`, a
 relationship of `invokes` or `observes`, and `required: true`. They are validated by the same rules as every AppPort dependency
-(AppPort `lintIntegration`; until it is published with canonical targets, `appport-compat.ts`), plus: an application target is refused (`DEPENDENCY_NOT_CANONICAL`); optional and `delegates`/`consumes-event`
+(AppPort `lintIntegration`), plus: an application target is refused (`DEPENDENCY_NOT_CANONICAL`); optional and `delegates`/`consumes-event`
 dependencies are not supported. Versions use AppPort's integer major versions and constraints (`1`, `^1`, `>=2`, …), never SemVer.
 
 `target.provider` is a **constraint** on resolution, distinct from the canonical requirement: it restricts which claims may satisfy it. It is
@@ -129,9 +131,9 @@ fails closed on an operand of the wrong type rather than coercing it, so rules c
 
 * `uses` names a declared canonical dependency. `effect` is what the recipe relies on; the environment check compares it with the contract.
 * `expects` are the canonical shapes the recipe was written against. Recipe data references use `expects.output`; the environment check
-  compares both with the contract by AppPort's evolution rules (`compareManifests`), with the same direction rules as manifest evolution and fulfillment.
+  compares both with the contract by AppPort's `compareSchemas`, with the same direction rules as manifest evolution and fulfillment.
 * `input` uses the `appport.mapping/1` rule vocabulary (`copy` for selection and renaming with an explicit `default` for missing data, `const`,
-  `enum`, `unit`, `encoding`) plus `compute` (`{ op, to, expr }`). Rules are checked by **AppPort's own `lintMapping`**, rule by rule, as mapping artifacts are:
+  `enum`, `unit`, `encoding`) plus `compute` (`{ op, to, expr }`). Rules are checked by **AppPort's `lintRule`**, the same per-rule check `lintMapping` applies to mapping artifacts:
   declared pointers, types, units, encodings, enum tables, concepts, and optional-to-required without a default. Every required input field
   must be produced (`MAPPING_INCOMPLETE`). A concept change needs `conceptRelation: "exact"`: recipes have no way to declare a loss of
   meaning.
@@ -262,9 +264,18 @@ Validation makes no network call, invokes nothing, executes no business action, 
 A provider changes only through `substituteProvider(lock, id, resolution)`, which requires the same canonical capability at the same
 contract and capability digests and a valid fulfillment. A different canonical revision is not a substitution.
 
+**Revalidate or re-resolve.** *Revalidate* means the canonical contract changed: the recipe must be validated again against the new
+revision, providers must re-claim against it (AppPort reports old claims `stale`), and a new lock made. *Re-resolve* means only the
+environment's provider side changed: the canonical assumptions still hold, and resolving again (with AppPort's resolver) gives a new
+`resolution`. Neither invalidates the recipe source: source validity and environment validity are reported separately.
+
 **What a lock guarantees.** It makes dependency selection and contract assumptions explicit and checkable. It does **not** guarantee that
-external systems behave deterministically, that two runs have the same business outcome, or that a package came from a trusted publisher. It
-grants no authority: binding still requires an authorization grant for the provider's capability, exactly as without a lock.
+external systems behave deterministically, that two runs have the same business outcome, or that a package came from a trusted publisher.
+
+**Why a lock grants no authority.** A lock is a record of what was selected, not a decision anyone authorized. Authority comes only from
+AppPort's grants and bindings: the binder authorizes the **provider's** capability, which a grant must name; a fulfillment claim, a canonical
+name, a lock entry or a package carries no grant, and a binding is still refused when its canonical evidence is forged, mismatched or stale.
+The tests exercise this against the real `CapabilityBinder` and durable grants (`packages/recipe/test/canonical-resolution.test.ts`).
 
 ## 6. Package (`appport.recipe-package/1`)
 
@@ -324,8 +335,8 @@ contract revisions the recipe was checked against (`checkRecipeLock`). 11. Execu
 its own bindings and grants (future). 12. Verify the outcome with the declared verifications (future runtime).
 
 The named functions are those exported by the published `@distribution-protocol/protocol` 1.0.0, which `@appport/recipe-distribution`
-pins. Steps 2 and 10 need AppPort's canonical discovery and `resolvedDependency()` (merged on AppPort `main`, not yet published in
-`@appport/core`); a lock reads those records structurally and is tested against their documented shape.
+pins. Steps 2 and 10 use AppPort's published canonical discovery, resolution and `resolvedDependency()` (`@appport/core` 1.3.0);
+`createRecipeLock` takes those records as they are, and the tests build every lock from real resolutions.
 
 ### 7.2 Identities
 

@@ -23,7 +23,7 @@ Published under the `@appport/*` ecosystem scope; owned, versioned and released 
 
 | Package | Contents | Depends on |
 |---|---|---|
-| [`@appport/recipe`](packages/recipe) | recipe source model, expressions, validation, locks, packages, JSON Schemas | `@appport/protocol`, `@appport/schema`, `@appport/integration` (published) |
+| [`@appport/recipe`](packages/recipe) | recipe source model, expressions, validation, locks, packages, JSON Schemas | `@appport/protocol` 1.2.0, `@appport/schema` 1.1.1, `@appport/integration` 1.2.0 (published); tested against `@appport/core` 1.3.0 |
 | [`@appport/recipe-distribution`](packages/recipe-distribution) | recipe package ↔ `distribution/1` release manifest; acceptance of acquired bytes | `@appport/recipe`, `@distribution-protocol/protocol` 1.0.0 |
 
 ```ts

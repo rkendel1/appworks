@@ -7,18 +7,21 @@
  *   schema the contract no longer accepts, no eligible provider). Supplied by the caller; nothing is fetched.
  *
  * Validation reads only what it is given. It makes no network call, invokes nothing, selects no provider and grants no
- * authority. It reuses AppPort's own published checks: mapping rules through `lintMapping` (./rules.ts), interface
- * compatibility through `compareManifests`, semantic annotations through `validateSemanticAnnotations`, versions and
- * dependency references through `isVersionConstraint` / `parseDependencyRef`. Canonical dependency targets, which
- * published `lintIntegration` predates, are checked in ./appport-compat.ts.
+ * authority. It uses AppPort's published checks directly: dependency declarations, including canonical targets, through
+ * `lintIntegration`; mapping rules through `lintRule` and `requiredTargetsNotProduced` (`@appport/integration`); interface
+ * compatibility through `compareSchemas`; semantic annotations through `validateSemanticAnnotations`.
  */
 import {
-  compareManifests,
+  INTEGRATION_EXTENSION,
+  compareSchemas,
   findCapabilityVersion,
   getIntegration,
+  isCanonicalContract,
+  isCanonicalDependencyTarget,
   isPointer,
   isRequiredAt,
   isValidApplicationId,
+  lintIntegration,
   parseDependencyRef,
   parsePointer,
   satisfiesVersionConstraint,
@@ -26,15 +29,13 @@ import {
   validateSemanticAnnotations,
   type AppPortManifest,
   type CapabilityVersionEntry,
+  type Dependency,
   type JSONSchema,
   type JsonValue
 } from "@appport/protocol";
 import { fromJSONSchema } from "@appport/schema";
-import type { Rule } from "@appport/integration";
-import { isCanonicalContract, isCanonicalDependencyTarget, lintCanonicalDependencies, type RecipeDependency } from "./appport-compat.js";
-import { lintRecipeRules, type RuleSource } from "./rules.js";
-import { schemaTypes } from "./expression.js";
-import { checkExpression, type ExpressionIssue, type ReferenceResolution } from "./expression.js";
+import { lintRule, requiredTargetsNotProduced, type RuleEndpoint } from "@appport/integration";
+import { checkExpression, schemaTypes, type ExpressionIssue, type ReferenceResolution } from "./expression.js";
 import {
   END_OUTCOMES,
   RECIPE_FORMAT,
@@ -177,7 +178,7 @@ export function validateRecipe(source: unknown, environment?: RecipeEnvironment)
   const recipe = source as unknown as RecipeSource;
 
   // ------------------------------------------------------------------ dependencies (reusing lintIntegration)
-  const dependencies = new Map<string, { dependency: RecipeDependency; index: number }>();
+  const dependencies = new Map<string, { dependency: Dependency; index: number }>();
   checkDependencies(recipe.requires, recipe.id);
   recipe.requires.forEach((dependency, index) => {
     if (isPlain(dependency) && typeof dependency.id === "string" && !dependencies.has(dependency.id)) dependencies.set(dependency.id, { dependency, index });
@@ -317,19 +318,9 @@ export function validateRecipe(source: unknown, environment?: RecipeEnvironment)
   const rules = (list: unknown, path: string, target: JSONSchema, avail: ReadonlySet<string> | undefined) => {
     if (!Array.isArray(list)) return void add("RECIPE_STRUCTURE", path, "rules must be an array");
     const written = new Set<string>();
-    const targetAt = (pointer: string) => {
+    const targetEndpoint: RuleEndpoint = (pointer) => {
       const node = pointer === "" ? target : schemaAt(target, pointer);
       return node ? { schema: node, required: pointer === "" || requiredChain(target, pointer) } : undefined;
-    };
-    // What goes to AppPort's mapping lint: the rules in its vocabulary, the schema each reads, and further writes
-    // (compute rules, and rules whose source is already reported) that count towards required-field coverage.
-    const linted: Rule[] = [];
-    const sources: Array<RuleSource | undefined> = [];
-    const indexes: number[] = [];
-    const coverage: Array<{ to: string; schema: JSONSchema }> = [];
-    const covered = (to: string) => {
-      const field = targetAt(to);
-      if (field) coverage.push({ to, schema: field.schema });
     };
     list.forEach((rule: unknown, index) => {
       const at = `${path}/${index}`;
@@ -342,14 +333,13 @@ export function validateRecipe(source: unknown, environment?: RecipeEnvironment)
       written.add(to);
       const missing = ({ enum: ["from", "table", "relation", "unmapped"], unit: ["from", "fromUnit", "toUnit"], encoding: ["from", "fromEncoding", "toEncoding"], copy: ["from"], const: ["value"], compute: ["expr"] } as Record<string, string[]>)[rule["op"] as string]!
         .filter((key) => rule[key] === undefined);
-      if (missing.length) return void (add("MAPPING_INVALID", at, `a ${String(rule["op"])} rule needs ${missing.join(", ")}`), covered(to));
-      if (rule["op"] === "enum" && !isPlain(rule["table"])) return void (add("MAPPING_INVALID", `${at}/table`, "table must be an object"), covered(to));
+      if (missing.length) return void add("MAPPING_INVALID", at, `a ${String(rule["op"])} rule needs ${missing.join(", ")}`);
+      if (rule["op"] === "enum" && !isPlain(rule["table"])) return void add("MAPPING_INVALID", `${at}/table`, "table must be an object");
 
       if (rule["op"] === "compute") {
         const checked = expression(rule["expr"], `${at}/expr`, avail);
-        const field = targetAt(to);
+        const field = targetEndpoint(to);
         if (!field) return void add("SCHEMA_MISMATCH", `${at}/to`, `${to} is not declared by the target schema`);
-        covered(to);
         if (checked.type) {
           const want = schemaTypes(field.schema);
           if (want.length && checked.type.types.length && !checked.type.types.some((t) => want.includes(t))) {
@@ -363,27 +353,24 @@ export function validateRecipe(source: unknown, environment?: RecipeEnvironment)
         }
         return;
       }
-      let source: RuleSource | undefined;
       if (rule["op"] !== "const") {
         const from = resolver(avail)(rule["from"] as string);
-        if ("error" in from) return void (add(from.code, `${at}/from`, from.error), covered(to));
-        source = from;
+        if ("error" in from) return void add(from.code, `${at}/from`, from.error);
       }
-      linted.push(rule as unknown as Rule);
-      sources.push(source);
-      indexes.push(index);
+      const source: RuleEndpoint = (pointer) => {
+        const resolved = resolver(avail)(pointer);
+        return "error" in resolved ? undefined : resolved;
+      };
+      lintRule(
+        rule as unknown as Parameters<typeof lintRule>[0],
+        at,
+        { source, target: targetEndpoint },
+        { requireConcepts: false, lossFor: () => false },
+        (where, message) => add("SCHEMA_MISMATCH", where.startsWith(at) ? where : at, message),
+        (where, message) => add("SCHEMA_MISMATCH", where.startsWith(at) ? where : at, message, "warning")
+      );
     });
-    for (const issue of lintRecipeRules(linted, sources, target, coverage)) {
-      const severity = issue.level === "error" ? "error" : "warning";
-      if (issue.rule === undefined) {
-        const incomplete = /^required target field (.+) is not produced by any rule$/.exec(issue.message);
-        if (incomplete) add("MAPPING_INCOMPLETE", path, `required field ${incomplete[1]} is not produced by any rule`, severity);
-        else add("SCHEMA_MISMATCH", path, issue.message, severity);
-        continue;
-      }
-      const at = `${path}/${indexes[issue.rule]}`;
-      add("SCHEMA_MISMATCH", issue.member ? `${at}/${issue.member}` : at, issue.message, severity);
-    }
+    for (const pointer of requiredTargetsNotProduced(target, written)) add("MAPPING_INCOMPLETE", path, `required field ${pointer} is not produced by any rule`);
   };
 
   const probes = (list: unknown, path: string, refs: { input?: JSONSchema; output?: JSONSchema }, kind: "verify" | "precondition") => {
@@ -546,16 +533,25 @@ export function validateRecipe(source: unknown, environment?: RecipeEnvironment)
 
   function checkDependencies(requires: unknown[], recipeId: string) {
     const id = isValidApplicationId(recipeId) ? recipeId : "org.invalid.recipe";
-    for (const issue of lintCanonicalDependencies(requires, id)) {
+    const manifest = {
+      protocol: "appport/1",
+      application: { id, name: id, version: "0.0.0" },
+      capabilities: [],
+      events: [],
+      transports: [],
+      extensions: [INTEGRATION_EXTENSION],
+      attributes: { [INTEGRATION_EXTENSION]: { capabilities: {}, requires } as unknown as JsonValue }
+    } as unknown as AppPortManifest;
+    for (const issue of lintIntegration(manifest)) {
       const match = /^descriptor\.requires\[(\d+)\](.*)$/.exec(issue.path);
-      if (!match) continue;
+      if (!match || issue.level !== "error") continue;
       const tail = match[2]!.replace(/\./g, "/");
       add(tail.endsWith("versionConstraint") ? "VERSION_CONSTRAINT_INVALID" : "DEPENDENCY_INVALID", `/requires/${match[1]}${tail}`, issue.message);
     }
     requires.forEach((dependency, index) => {
       const path = `/requires/${index}`;
       if (!isPlain(dependency) || !isPlain(dependency["target"])) return;
-      const target = dependency["target"] as RecipeDependency["target"];
+      const target = dependency["target"] as Dependency["target"];
       if (!isCanonicalDependencyTarget(target)) {
         return void add("DEPENDENCY_NOT_CANONICAL", `${path}/target`, "a recipe depends on canonical capabilities ({ contract, capability }), never on an application's own capability");
       }
@@ -602,8 +598,10 @@ export function validateRecipe(source: unknown, environment?: RecipeEnvironment)
       if (definition.effect !== undefined && definition.effect !== step.effect) {
         add("ENV_EFFECT_MISMATCH", `${path}/effect`, `the recipe treats ${key} as ${step.effect}; the contract declares it ${definition.effect}`, "error", "environment");
       }
-      for (const change of interfaceChanges(name, definition.version, step.expects, { input: definition.inputSchema as JSONSchema, output: definition.outputSchema as JSONSchema })) {
-        add("ENV_SCHEMA_INCOMPATIBLE", `${path}/expects/${change.side}`, change.message, "error", "environment");
+      for (const [side, mine, theirs] of [["input", step.expects.input, definition.inputSchema], ["output", step.expects.output, definition.outputSchema]] as const) {
+        for (const change of compareSchemas(mine, theirs as JSONSchema, `${key} ${side}`, side).filter((c) => c.severity === "breaking")) {
+          add("ENV_SCHEMA_INCOMPATIBLE", `${path}/expects/${side}`, change.message, "error", "environment");
+        }
       }
       const integration = getIntegration(contract)?.capabilities[key];
       const stateMethods = (integration?.verify ?? []).filter((m) => m.kind === "state").map((m) => m.id);
@@ -656,25 +654,3 @@ export function recipeDependencies(recipe: RecipeSource): Array<{ id: string; co
 
 // Keep the rule type reachable from this module's signatures.
 export type { RecipeRule };
-
-/**
- * Breaking differences between the interface a recipe step was written against and the contract's, by AppPort's own
- * evolution rules (published `compareManifests`): a consumer written against `expected` served by `actual`. Inputs may
- * not narrow, outputs may not widen. Once `@appport/protocol` publishes `compareSchemas`, call it directly.
- */
-function interfaceChanges(name: string, version: number, expected: { input: JSONSchema; output: JSONSchema }, actual: { input: JSONSchema; output: JSONSchema }): Array<{ side: "input" | "output"; message: string }> {
-  const manifest = (schemas: { input: JSONSchema; output: JSONSchema }): AppPortManifest => {
-    const definition = { version, kind: "request" as const, inputSchema: schemas.input, outputSchema: schemas.output, authorization: [] };
-    return {
-      protocol: "appport/1",
-      application: { id: "org.appworks.interface", name: "interface", version: "0.0.0" },
-      capabilities: [{ name, versions: [version], latestVersion: version, ...definition, definitions: [definition] }],
-      events: [],
-      transports: []
-    } as unknown as AppPortManifest;
-  };
-  return compareManifests(manifest(expected), manifest(actual)).breaking.flatMap((change) => {
-    const side = / input\b/.test(change.target) ? "input" : / output\b/.test(change.target) ? "output" : undefined;
-    return side ? [{ side, message: change.message }] : [];
-  });
-}

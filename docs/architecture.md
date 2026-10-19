@@ -35,29 +35,32 @@ require an AppPort release, and an AppPort release does not require an AppWorks 
             └──→ @distribution-protocol/protocol
 
 AppPort packages ──✗──→ anything in this repository
-@appport/recipe  ──✗──→ @appport/core, @distribution-protocol/*, any registry
+@appport/recipe  ──✗──→ @distribution-protocol/*, any registry; @appport/core only as a devDependency (tests)
 ```
 
 1. **AppWorks depends on AppPort; AppPort does not depend on AppWorks.** AppWorks consumes AppPort's **published** packages at exact versions,
    so it builds, tests and installs without an AppPort checkout. No `workspace:`, `link:`, `file:` or git dependency on an AppPort package,
    and no import, path alias or project reference into a sibling checkout.
-2. **`@appport/recipe` depends only on `@appport/protocol`, `@appport/schema` and `@appport/integration`.** It reads `@appport/core`'s
-   `resolvedDependency()` records structurally and has no dependency on the runtime.
+2. **`@appport/recipe` depends only on `@appport/protocol` 1.2.0, `@appport/schema` 1.1.1 and `@appport/integration` 1.2.0 at run time.**
+   It builds locks from `@appport/core`'s `resolvedDependency()` records, which the caller resolved. `@appport/core` 1.3.0 is a
+   devDependency, so its tests run against real resolution and binding, and no shipped source imports it.
 3. **Only `@appport/recipe-distribution` depends on Distribution Protocol.** The recipe model, validation, locks and package format work with
    no distribution layer and no registry.
 4. **No code execution in the recipe model.** No `eval`, `Function`, dynamic import, `vm` or child process.
-5. **No parallel implementations.** Canonical capability identity, fulfillment validation, resolution, authorization and invocation are
-   AppPort's. Where AppWorks needs an AppPort check that is merged but not yet published, it is isolated in `appport-compat.ts`, limited to
-   wire-format constants and shape checks, and listed in `docs/compatibility.md` §3 for removal.
+5. **No parallel implementations.** Canonical capability identity, fulfillment validation, discovery, resolution, authorization and
+   invocation are AppPort's, used through its published API (`docs/compatibility.md` §3).
 
-`scripts/check-boundary.mjs` enforces 1–4 on every build. Rule 5 is a review rule.
+`scripts/check-boundary.mjs` enforces 1–4 on every build (including that `@appport/core` is never a runtime or peer dependency and never
+imported by shipped source). Rule 5 is a review rule.
 
 ## 4. How the recipe layer uses AppPort
 
 | AppWorks needs | Published AppPort API used |
 |---|---|
-| Check transformation rules (types, units, encodings, enums, concepts, defaults, required fields) | `lintMapping`, `schemaIdentity` (`@appport/integration`), through `rules.ts` |
-| Compare a step's expected interface with the contract | `compareManifests` (`@appport/protocol`) |
+| Check transformation rules (types, units, encodings, enums, concepts, defaults, required fields) | `lintRule`, `requiredTargetsNotProduced` (`@appport/integration`) |
+| Compare a step's expected interface with the contract | `compareSchemas` (`@appport/protocol`) |
+| Check dependency declarations, including canonical targets | `lintIntegration`, `isCanonicalDependencyTarget`, `Dependency` (`@appport/protocol`) |
+| Recognize a canonical contract | `isCanonicalContract` (`@appport/protocol`) |
 | Digests and canonical JSON | `digestOf`, `canonicalize`, `contractDigest`, `capabilityDigest`, `isDigest` |
 | Pointers and schema lookup | `schemaAt`, `isRequiredAt`, `parsePointer`, `isPointer`, `readPointer` |
 | Versions and dependency references | `isVersionConstraint`, `satisfiesVersionConstraint`, `parseDependencyRef` |
@@ -65,9 +68,10 @@ AppPort packages ──✗──→ anything in this repository
 | Input validation | `fromJSONSchema` (`@appport/schema`) |
 | Verification and precondition model | `StateExpectation`, `ValueRef`, `EffectDescriptor` types |
 
-Not reused because not yet published: the canonical-contract marker and canonical dependency targets (AppPort `fulfillment-1` and
-`dependencies-1`; see `docs/compatibility.md` §3), and canonical discovery and resolution in `@appport/core`, which recipe environments
-need (`spec/recipe-1.md` §7.1, steps 2 and 10).
+A recipe **environment** uses AppPort's runtime directly: `CanonicalContractRegistry` for contracts, `ApplicationDependencyResolver`
+(`discoverCanonical`, `resolveRequirement`) for discovery and resolution, `resolvedDependency()` for the records a lock is built from, and
+`CapabilityBinder` with authorization grants for bindings (`@appport/core`). AppWorks adds the recipe-level checks around them
+(`validateRecipe` with an environment, `createRecipeLock`, `checkRecipeLock`, `substituteProvider`) and nothing in their place.
 
 ## 5. Authority and evidence
 

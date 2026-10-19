@@ -62,7 +62,10 @@ const project = join(scratch, "project");
 mkdirSync(project, { recursive: true });
 writeFileSync(join(project, "package.json"), JSON.stringify({ name: "appworks-installed-consumer", version: "0.0.0", private: true, type: "module" }, null, 2));
 const env = { ...process.env, npm_config_cache: join(scratch, "npm-cache") };
-run("npm", ["install", "--no-audit", "--no-fund", "--loglevel=error", ...files], { cwd: project, env });
+// The packed AppWorks tarballs, plus the AppPort runtime from the registry at the exact version @appport/recipe tests against
+// (a consumer that resolves canonical dependencies brings its own @appport/core; @appport/recipe does not depend on it).
+const coreVersion = JSON.parse(readFileSync(join(root, "packages", "recipe", "package.json"), "utf8")).devDependencies["@appport/core"];
+run("npm", ["install", "--no-audit", "--no-fund", "--loglevel=error", ...files, `@appport/core@${coreVersion}`, "@types/node@22"], { cwd: project, env });
 for (const name of Object.keys(manifests)) {
   const installed = join(project, "node_modules", name);
   if (lstatSync(installed).isSymbolicLink() || realpathSync(installed).startsWith(root + sep)) {
@@ -71,14 +74,22 @@ for (const name of Object.keys(manifests)) {
   }
 }
 const recipeManifest = manifests["@appport/recipe"];
-for (const [name, version] of Object.entries(recipeManifest.dependencies)) {
+for (const [name, version] of Object.entries({ ...recipeManifest.dependencies, "@appport/core": coreVersion })) {
   const installed = JSON.parse(readFileSync(join(project, "node_modules", name, "package.json"), "utf8")).version;
   if (installed !== version) {
     console.error(`${name}: installed ${installed}, the manifest declares ${version}`);
     process.exit(1);
   }
 }
-console.log(`Installed ${Object.keys(manifests).length} real packages, with @appport/{protocol,schema,integration} from the registry`);
+// One copy of each AppPort package: a second, older @appport/protocol beside the new one would split types and identities.
+for (const name of ["@appport/protocol", "@appport/schema", "@appport/integration"]) {
+  const listing = spawnSync("npm", ["ls", name, "--all", "--parseable"], { cwd: project, encoding: "utf8" }).stdout.trim().split("\n").filter(Boolean);
+  if (new Set(listing).size !== 1) {
+    console.error(`${name} is installed more than once:\n${listing.join("\n")}`);
+    process.exit(1);
+  }
+}
+console.log(`Installed ${Object.keys(manifests).length} real packages, with @appport/{protocol,schema,integration} and @appport/core@${coreVersion} from the registry, one copy each`);
 
 // 4. A consumer that knows only the public exports.
 copyFileSync(join(root, "examples", "supplier-invoice", "recipe.json"), join(project, "recipe.json"));
@@ -107,13 +118,12 @@ check(distribution.DISTRIBUTION_PROTOCOL === "distribution/1" && typeof distribu
 const consumer = run("node", ["consumer.mjs"], { cwd: project });
 process.stdout.write(consumer.stdout);
 
-// 5. TypeScript consumers get the declarations.
-writeFileSync(join(project, "types.ts"), `import { validateRecipe, type RecipeSource, type RecipeValidation } from "@appport/recipe";
-import { acceptAcquiredRecipePackage, type RecipePackageAcceptance } from "@appport/recipe-distribution";
-export const v: (s: RecipeSource) => RecipeValidation = (s) => validateRecipe(s);
-export type A = RecipePackageAcceptance; export const a = acceptAcquiredRecipePackage;
-`);
-writeFileSync(join(project, "tsconfig.json"), JSON.stringify({ compilerOptions: { module: "NodeNext", moduleResolution: "NodeNext", target: "ES2022", strict: true, noEmit: true, skipLibCheck: false, types: [] }, files: ["types.ts"] }));
+// 5. A strict TypeScript consumer of the installed declarations, including AppPort's published record types.
+copyFileSync(join(root, "scripts", "installed-consumer", "types.ts"), join(project, "types.ts"));
+writeFileSync(join(project, "tsconfig.json"), JSON.stringify({ compilerOptions: { module: "NodeNext", moduleResolution: "NodeNext", target: "ES2022", lib: ["ES2022"], strict: true, noEmit: true, skipLibCheck: false, types: ["node"] }, files: ["types.ts"] }));
 run(join(root, "node_modules", ".bin", "tsc"), ["-p", "tsconfig.json"], { cwd: project });
 console.log("  ok  the public declarations typecheck in a consumer project");
+// 6. A recipe lock over real canonical resolution by the published @appport/core.
+copyFileSync(join(root, "scripts", "installed-consumer", "canonical.mjs"), join(project, "canonical.mjs"));
+process.stdout.write(run("node", ["canonical.mjs"], { cwd: project }).stdout);
 console.log(`\nRelease check passed (${project})`);

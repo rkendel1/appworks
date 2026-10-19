@@ -1,32 +1,39 @@
 /**
  * Test fixtures for recipes. The accounting contract below is a TEST FIXTURE: it stands in for a canonical contract
  * that does not exist, so environment checks, locks and packages can be exercised. It is not published, and nothing
- * registers or implements it outside these tests.
+ * registers or implements it outside these tests. Registries, resolution and bindings are the real ones from the
+ * installed `@appport/core` (a development dependency only: `@appport/recipe` itself does not depend on it).
  */
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
+  CANONICAL_CONTRACT_EXTENSION,
   INTEGRATION_EXTENSION,
-  capabilityDigest,
   type AppPortManifest,
   type CapabilityIntegration,
   type CapabilityVersionEntry,
   type JSONSchema
 } from "@appport/protocol";
-import { CANONICAL_CONTRACT_EXTENSION, type CapabilityStep, type RecipeSource } from "../src/index.js";
+import { fromJSONSchema } from "@appport/schema";
+import {
+  ApplicationDependencyResolver,
+  ApplicationRegistry,
+  CanonicalContractRegistry,
+  MemoryApplicationStateStore,
+  defineApplication,
+  defineCapability,
+  implementation,
+  resolvedDependency,
+  type RequirementManifestEntry,
+  type ResolutionResult,
+  type ResolvedDependency
+} from "@appport/core";
+import { claimFor } from "@appport/protocol";
+import type { CapabilityStep, RecipeSource } from "../src/index.js";
 
 export const CONTRACT = "org.example.accounting";
 
-/**
- * A fulfillment claim on a capability of the fixture contract, as AppPort's `claimFor` builds one (AppPort
- * `spec/fulfillment-1.md` §3). Built from the published `capabilityDigest` because published AppPort predates `claimFor`.
- */
-export const claimFor = (contract: AppPortManifest, capability: string, version: number) => ({
-  contract: contract.application.id,
-  capability,
-  version,
-  digest: capabilityDigest(contract, capability, version)!
-});
+export { claimFor };
 const EXAMPLE = fileURLToPath(new URL("../../../examples/supplier-invoice/recipe.json", import.meta.url));
 
 /** A fresh copy of the supplier-invoice example. */
@@ -87,4 +94,93 @@ export function accountingContract(options: { description?: string; approval?: C
     extensions: [CANONICAL_CONTRACT_EXTENSION, INTEGRATION_EXTENSION],
     attributes: { [INTEGRATION_EXTENSION]: { capabilities: { "invoice.submit@1": integration } } as never }
   };
+}
+
+// ------------------------------------------------------------------ a real AppPort environment (installed @appport/core)
+
+/**
+ * A provider implementing the fixture contract under its own capability names, claiming each canonical capability with
+ * AppPort's `claimFor`, and declaring the integration obligations the canonical `invoice.submit` requires. Every call to an
+ * implementation is recorded in `calls`, so a test can prove a refused invocation never reached it.
+ */
+export function ledgerProvider(id: string, contract: AppPortManifest = accountingContract(), calls: string[] = []) {
+  const def = (name: string) => contract.capabilities.find((c) => c.name === name)!;
+  const make = (local: string, canonical: string, extra: Record<string, unknown> = {}) =>
+    defineCapability({
+      name: local,
+      version: 1,
+      input: fromJSONSchema(def(canonical).inputSchema as JSONSchema),
+      output: fromJSONSchema(def(canonical).outputSchema as JSONSchema),
+      authorization: [...def(canonical).authorization],
+      effect: def(canonical).effect!,
+      ...(def(canonical).idempotency ? { idempotency: def(canonical).idempotency } : {}),
+      fulfills: [claimFor(contract, canonical, 1)],
+      handler: async () => (calls.push(`${id}:${local}`), { invoiceId: "inv-1", status: "submitted", duplicate: false }) as never,
+      ...extra
+    } as never);
+  const submit = make("ledger.post", "invoice.submit", {
+    integration: {
+      effects: [{ type: "https://vocab.example.org/finance#invoice-recorded" }],
+      approval: { required: false },
+      verify: [{ id: "invoice-recorded", kind: "state", via: { capability: "ledger.read", version: 1, input: { invoiceId: { $output: "/invoiceId" } } }, expect: [{ at: "/invoiceNumber", equals: { $input: "/invoiceNumber" } }] }],
+      failures: [{ code: "TIMEOUT", retry: "after-verification", effect: "possible" }]
+    }
+  });
+  const capabilities = [make("ledger.duplicates", "invoice.duplicate"), make("ledger.read", "invoice.get"), submit];
+  const app = defineApplication({
+    identity: { id, name: id, version: "1.0.0" },
+    provides: capabilities as never,
+    implementations: Object.fromEntries(capabilities.map((c) => [`${c.name}@${c.version}`, implementation(c.handler as never)]))
+  });
+  return { app, capabilities: Object.fromEntries(capabilities.map((c) => [c.name, c])) as Record<string, (typeof capabilities)[number]>, calls };
+}
+
+/** The canonical requirements a recipe declares, as AppPort requirement entries. */
+export const requirementsOf = (recipe: RecipeSource): RequirementManifestEntry[] =>
+  recipe.requires.map((d) => {
+    const target = d.target as { contract: string; capability: string };
+    return { name: target.capability, version: 1, versionConstraint: d.versionConstraint ?? "1", canonical: { contract: target.contract } };
+  });
+
+/** Registries holding the fixture contract (active) and, by default, one ledger provider. Everything is AppPort's own. */
+export async function canonicalEnvironment(options: { providers?: string[] } = {}) {
+  const registry = new ApplicationRegistry(new MemoryApplicationStateStore());
+  const contracts = new CanonicalContractRegistry();
+  await contracts.register(accountingContract());
+  await contracts.activate(CONTRACT);
+  const calls: string[] = [];
+  const register = async (app: ReturnType<typeof defineApplication>) =>
+    registry.activate((await registry.register({ identity: app.identity, manifest: app.manifest(), fingerprint: app.fingerprint(), verification: app.verify() })).id);
+  const providers: Record<string, ReturnType<typeof ledgerProvider>> = {};
+  for (const id of options.providers ?? ["com.example.ledger"]) {
+    providers[id] = ledgerProvider(id, accountingContract(), calls);
+    await register(providers[id]!.app);
+  }
+  const resolver = () => new ApplicationDependencyResolver(registry, { contracts });
+
+  /** Resolves one declared dependency with the real resolver. */
+  async function resolve(recipe: RecipeSource, dependencyId: string, provider?: string): Promise<ResolutionResult> {
+    const index = recipe.requires.findIndex((d) => d.id === dependencyId);
+    const requirement = requirementsOf(recipe)[index]!;
+    return resolver().resolveRequirement({ ...requirement, ...(provider ? { provider: { applicationId: provider } } : {}) });
+  }
+  /** `resolvedDependency()` records for every dependency, from real resolutions. Throws when one does not resolve. */
+  async function records(recipe: RecipeSource, provider?: string): Promise<Record<string, ResolvedDependency>> {
+    const out: Record<string, ResolvedDependency> = {};
+    for (const d of recipe.requires) {
+      const result = await resolve(recipe, d.id, provider);
+      if (result.kind !== "resolved") throw new Error(`${d.id} did not resolve: ${result.kind}${result.kind === "unresolved" ? ` (${result.reason})` : ""}`);
+      out[d.id] = resolvedDependency(result);
+    }
+    return out;
+  }
+  /** What a lock or validation is checked against: the active contracts and current registrations. */
+  async function snapshot() {
+    const current = await contracts.get(CONTRACT);
+    return {
+      contracts: { [CONTRACT]: current?.status === "active" ? current.manifest : undefined },
+      providers: Object.fromEntries((await registry.list()).map((s) => [s.id, { registrationId: s.registrationId, fingerprint: s.fingerprint, status: s.status }]))
+    };
+  }
+  return { registry, contracts, register, resolver, resolve, records, snapshot, providers, calls };
 }
