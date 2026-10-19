@@ -20,3 +20,4 @@ body { margin: 0; background: var(--stack-color-bg-canvas); color: var(--stack-c
 .appworks-noscript { padding: var(--stack-space-6); }
 .appworks-diff { margin: var(--stack-space-3) 0; }
 .appworks-diff pre { max-height: 32rem; overflow: auto; padding: var(--stack-space-3); border: var(--stack-border-width-thin) solid var(--stack-color-border-default); border-radius: var(--stack-radius-md); background: var(--stack-color-bg-surface); font-family: var(--stack-font-family-mono); font-size: var(--stack-text-sm-size); white-space: pre; }
+#agent td, #integration td { overflow-wrap: anywhere; }

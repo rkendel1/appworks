@@ -26,3 +26,5 @@ export { openaiAgent, type OpenAIAgentOptions } from "./agent/providers/openai.j
 export { deterministicAgent } from "./agent/providers/deterministic.js";
 export { scriptedAgent, type ScriptedAgent, type ScriptStep } from "./agent/providers/fake.js";
 export { toolName, ASK_TOOL, FINISH_TOOL } from "./agent/providers/shared.js";
+export { proposeInstallation, APPPORT_SDK_VERSION, INSTALLATION_FORMAT, type AppPortInstallation, type InstallationFile } from "./install.js";
+export { installPackages, startIntegration, type RunningIntegration, type RunnerResult } from "./runner.js";

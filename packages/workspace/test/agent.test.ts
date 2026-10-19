@@ -1,7 +1,7 @@
 import { appendFileSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { AgentError, AgentRuntime, deterministicAgent, scriptedAgent, SimulatedCrash, WorkspaceError, type AgentRunRecord, type AgentTurnRecord, type Run, type Workspace } from "../src/index.js";
+import { AgentError, AgentRuntime, projectView, deterministicAgent, scriptedAgent, SimulatedCrash, WorkspaceError, type AgentRunRecord, type AgentTurnRecord, type Run, type Workspace } from "../src/index.js";
 import { advanceTo, CANDIDATE, extractionsRoot, notesRepository, openWorkspace, OPERATOR, step, tempDir, VIEWER } from "./helpers.js";
 
 const finished = (started: { done: Promise<AgentRunRecord> }) => started.done;
@@ -34,14 +34,24 @@ describe("the agent runtime drives the workflow autonomously", () => {
       const agent = deterministicAgent();
       let started = await runtime.start(OPERATOR, id, { agent });
       let run = await finished(started);
-      // Acquire through request-approval ran without anyone; execution waits for generate-files.
+      // The revision has no AppPort integration: the agent proposes installing one and waits for its approval.
       expect(run.status).toBe("paused");
-      expect((await ws.project(OPERATOR, id)).stage).toBe("awaiting-approval");
-      const steps = (await turnsOf(runtime, run.id)).map((t) => [t.action, t.status]);
-      expect(steps).toEqual([
+      expect((await ws.project(OPERATOR, id)).stage).toBe("integration-proposed");
+      expect((await turnsOf(runtime, run.id)).map((t) => [t.action, t.status])).toEqual([
         ["workflow.acquire@1", "succeeded"],
         ["workflow.pin@1", "succeeded"],
         ["workflow.inspect@1", "succeeded"],
+        ["workflow.propose-integration@1", "succeeded"],
+        ["workflow.install-integration@1", "paused"]
+      ]);
+      expect(run.pause).toMatchObject({ kind: "approval", approval: "modify-integration" });
+      await approvePaused(ws, runtime, run.id);
+      run = await finished(await runtime.resume(OPERATOR, run.id, { agent }));
+      // Installed, discovered on the installed integration, then through request-approval without anyone.
+      expect(run.status).toBe("paused");
+      expect((await ws.project(OPERATOR, id)).stage).toBe("awaiting-approval");
+      expect((await turnsOf(runtime, run.id)).slice(5).map((t) => [t.action, t.status])).toEqual([
+        ["workflow.install-integration@1", "succeeded"],
         ["workflow.discover@1", "succeeded"],
         ["workflow.assess@1", "succeeded"],
         ["workflow.reconcile@1", "succeeded"],
@@ -50,6 +60,10 @@ describe("the agent runtime drives the workflow autonomously", () => {
         ["workflow.request-approval@1", "succeeded"],
         ["workflow.execute@1", "paused"]
       ]);
+      const view = await projectView(ws, OPERATOR, id);
+      expect(view.installation).toMatchObject({ state: "installed", directory: "appport", application: { id: "com.github.example.notes" }, install: { verified: true } });
+      expect(view.discovery).toMatchObject({ outcome: "discovered", application: { id: "com.github.example.notes" }, capabilities: [] });
+      expect(view.installation!.install!.patch).toMatch(/^diff --git a\/appport\/.gitignore/m);
       // The selection is the reviewed extraction's candidate, and attributed to the agent.
       expect((await ws.records<{ kind: string; candidate?: string; rationale?: string }>(OPERATOR, "Decision", id)).find((d) => d.kind === "candidate-selection")).toMatchObject({ candidate: CANDIDATE, rationale: expect.stringMatching(/^agent-proposed: /) });
       // Every action went through the workflow: one run per step, no execution yet.
@@ -86,6 +100,9 @@ describe("the agent runtime drives the workflow autonomously", () => {
       const id = await project(ws, mirror);
       const agent = deterministicAgent();
       const run = await finished(await runtime.start(OPERATOR, id, { agent }));
+      await approvePaused(ws, runtime, run.id); // installing AppPort
+      const paused = await finished(await runtime.resume(OPERATOR, run.id, { agent }));
+      expect(paused.pause).toMatchObject({ approval: "generate-files" });
       const before = await approvePaused(ws, runtime, run.id);
       appendFileSync(join(ex.dir, "adapter.mjs"), "// changed after approval\n");
       const again = await finished(await runtime.resume(OPERATOR, run.id, { agent }));
@@ -222,9 +239,8 @@ describe("one agent run per project, recoverable after a crash", () => {
       expect((await survivor.runs(OPERATOR, id))[0]!.interrupted).toBe(true);
       await expect(survivor.start(OPERATOR, id, { agent })).rejects.toMatchObject({ code: "AGENT_RUN_INTERRUPTED" });
       const run = await finished(await survivor.resume(OPERATOR, started.run, { agent }));
-      // It carried on from the recorded state; this workspace has no reviewed extraction, so it ends at that blocker.
-      expect(run.status).toBe("blocked");
-      expect(run.outcome!.blockers!.join(" ")).toMatch(/PLAN_MISSING/);
+      // It carried on from the recorded state, to the approval installing AppPort needs.
+      expect(run).toMatchObject({ status: "paused", pause: { approval: "modify-integration" } });
       const first = (await turnsOf(survivor, run.id))[0] as AgentTurnRecord;
       expect(first).toMatchObject({ status: "succeeded", action: "workflow.acquire@1", result: { status: "succeeded", summary: expect.stringMatching(/recovered from the workflow's record, not repeated/) } });
       expect((await workflowRuns(ws, id)).filter((r) => r.step === "acquire")).toHaveLength(1);

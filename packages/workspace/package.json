@@ -27,6 +27,7 @@
     "ui",
     "vendor/stack-ui",
     "feltdb.flow",
+    "templates",
     "README.md"
   ],
   "scripts": {

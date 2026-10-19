@@ -12,6 +12,7 @@ import type { IntegrationRecord } from "./inspect.js";
 import { MODEL, STAGES, stageIndex, type ApprovalRecord, type ArtifactRecord, type Principal, type Project, type PromotionRecord, type Run, type StageEvent, type VerificationRecord } from "./model.js";
 import { digestOf } from "@appport/protocol";
 import type { ContractAdoption } from "./adoption.js";
+import type { AppPortInstallation } from "./install.js";
 import type { Promotion } from "./promotion.js";
 import type { InventoryRecord } from "./reconcile.js";
 import type { Workspace } from "./workflow.js";
@@ -31,6 +32,8 @@ export interface NextAction {
   inputs?: Array<{ name: string; label: string; required: boolean; hint?: string; value?: string }>;
   /** The approval its boundary will require, if any. */
   approval?: string;
+  /** For an `approve` action: the step the approval lets run. */
+  step?: string;
 }
 
 export interface ProjectView {
@@ -55,6 +58,8 @@ export interface ProjectView {
   acquisition: Status & { sha?: string; checkout?: string; treeDigest?: string };
   revisionNotice?: string;
   integration?: { status: IntegrationRecord["status"]; integrations: IntegrationRecord["integrations"]; evidence: IntegrationRecord["evidence"]; note: string; artifact: string };
+  /** Installing AppPort, for a revision without an integration: the proposal and, once approved and applied, the install. */
+  installation?: { state: "proposed" | "installed"; artifact: string; digest: string; directory: string; application: { id: string; name: string; version: string }; packages: Record<string, string>; port: number; files: Array<{ path: string; role: string; sha256: string }>; description: string; install?: { artifact: string; worktree: string; patch: string; verified: boolean; discovery?: { origin?: string; state?: string; capabilities: number } } };
   discovery?: { outcome: DiscoveryRecord["outcome"]; endpoint?: string; at: string; state?: string; reasons: string[]; application?: DiscoveryRecord["application"]; capabilities: DiscoveryRecord["capabilities"]; established: DiscoveryRecord["established"]; note: string; artifact: string };
   assessment?: { digest: string; artifact: string; fileDigest: string; partial: string[]; coverage: { filesSeen: number; filesAnalyzed: number }; candidates: number; recommendation?: string; questions: number };
   inventory?: InventoryRecord & { artifact: string };
@@ -145,6 +150,12 @@ export async function projectView(ws: Workspace, principal: Principal, id: strin
 
   const integration = await ws.artifact<IntegrationRecord>(principal, p.current.integration);
   if (integration) view.integration = { status: integration.body.status, integrations: integration.body.integrations, evidence: integration.body.evidence, note: integration.body.note, artifact: integration.record.id };
+  const proposal = await ws.artifact<AppPortInstallation>(principal, p.current.integrationProposal);
+  if (proposal) {
+    const i = proposal.body;
+    const install = await ws.artifact<{ worktree: string; patch: string; verified: boolean; discovery?: { origin?: string; state?: string; capabilities: number } }>(principal, p.current.integrationInstall);
+    view.installation = { state: install ? "installed" : "proposed", artifact: proposal.record.id, digest: i.digest, directory: i.directory, application: i.application, packages: i.packages, port: i.port, files: i.files.map((f) => ({ path: f.path, role: f.role, sha256: f.sha256 })), description: i.note, ...(install ? { install: { artifact: install.record.id, worktree: install.body.worktree, patch: install.body.patch, verified: install.body.verified, ...(install.body.discovery ? { discovery: install.body.discovery } : {}) } } : {}) };
+  }
   const discovery = await ws.artifact<DiscoveryRecord>(principal, p.current.discovery);
   if (discovery) {
     const d = discovery.body;
@@ -243,8 +254,24 @@ export function advise(v: ProjectView): ProjectView["next"] {
       add("inspect", "Inspect integration", "look for an existing AppPort integration in the pinned files (static: nothing runs)");
       break;
     case "integration-inspected":
-      add("discover", "Discover capabilities", v.integration?.status === "present" ? "find a running instance from the ports the pinned source names (loopback only) and ask it what it advertises, through AppPort's client. Nothing is invoked and no credential is sent" : "no integration was found; discovery records that explicitly");
-      if (v.integration?.status === "present") add("discover", "Discover at a given origin", "only if the application runs somewhere the source does not say", { inputs: [{ name: "endpoint", label: "Application origin", required: true, hint: "for example http://127.0.0.1:4000. No credential is sent." }] });
+      if (v.integration?.status === "present") {
+        add("discover", "Discover capabilities", "find a running instance from the ports the pinned source names (loopback only) and ask it what it advertises, through AppPort's client. Nothing is invoked and no credential is sent");
+        add("discover", "Discover at a given origin", "only if the application runs somewhere the source does not say", { inputs: [{ name: "endpoint", label: "Application origin", required: true, hint: "for example http://127.0.0.1:4000. No credential is sent." }] });
+      } else {
+        add("propose-integration", "Install AppPort", "the revision has no AppPort integration: propose adding one (an AppPort application of its own, in a new directory) so its capabilities can be published. Nothing is written until it is approved");
+        add("discover", "Continue without AppPort", "record that there is no integration to discover");
+      }
+      break;
+    case "integration-proposed": {
+      const i = v.installation;
+      const granted = i && v.approvals.find((x) => x.action === "modify-integration" && x.subject === i.digest && x.status === "granted");
+      if (granted) add("install-integration", "Install AppPort", `add ${i!.files.length} files under ${i!.directory}/ to an isolated worktree, install its packages and check it serves discovery`, { approval: "modify-integration" });
+      else add("approve", "Approve installing AppPort", i ? `add ${i.directory}/ (${i.files.length} files) as ${i.application.id} to an isolated worktree, install ${Object.entries(i.packages).map(([k, x]) => `${k}@${x}`).join(", ")} with lifecycle scripts disabled, and start it on loopback to check it.` : "install AppPort.", { approval: "modify-integration", step: "install-integration", inputs: [{ name: "action", label: "Action", required: true, value: "modify-integration" }, { name: "subject", label: "Subject", required: true, ...(i ? { value: i.digest } : {}) }] });
+      add("propose-integration", "Propose again", "if the pinned revision's layout changed");
+      break;
+    }
+    case "integration-installed":
+      add("discover", "Discover capabilities", "start the installed AppPort integration from its worktree and discover it through AppPort's client");
       break;
     case "capabilities-discovered":
       add("assess", "Assess revision", "static assessment of the same pinned revision");
@@ -269,7 +296,7 @@ export function advise(v: ProjectView): ProjectView["next"] {
     case "awaiting-approval": {
       const pending = v.approvals.find((a) => a.action === "generate-files" && a.status !== "consumed");
       if (pending?.status === "granted") add("execute", "Execute extraction", "the approval is granted for the current subject; this runs the reviewed extraction against the isolated checkout", { approval: "generate-files" });
-      else add("approve", "Approve generating files", pending?.subjectDescription ?? "approve the extraction run", { approval: "generate-files", inputs: [{ name: "action", label: "Action", required: true, value: "generate-files" }, { name: "subject", label: "Subject", required: true, ...(pending ? { value: pending.subject } : {}) }] });
+      else add("approve", "Approve generating files", pending?.subjectDescription ?? "approve the extraction run", { approval: "generate-files", step: "execute", inputs: [{ name: "action", label: "Action", required: true, value: "generate-files" }, { name: "subject", label: "Subject", required: true, ...(pending ? { value: pending.subject } : {}) }] });
       add("plan", "Re-validate plan", "if the plan changed, validate it again (the approval request follows the new subject)");
       break;
     }
@@ -290,7 +317,7 @@ export function advise(v: ProjectView): ProjectView["next"] {
       else {
         const granted = v.approvals.find((x) => x.action === "adopt-contract" && x.subject === a?.digest && x.status === "granted");
         if (granted) add("adopt-contract", "Adopt contract", "the approval covers exactly this proposal", { approval: "adopt-contract" });
-        else add("approve", "Approve contract adoption", `adopt ${a?.contract.application} ${a?.contract.capability}@${a?.contract.version} into the target's integration as proposed`, { approval: "adopt-contract", inputs: [{ name: "action", label: "Action", required: true, value: "adopt-contract" }, { name: "subject", label: "Subject", required: true, ...(a ? { value: a.digest } : {}) }] });
+        else add("approve", "Approve contract adoption", `adopt ${a?.contract.application} ${a?.contract.capability}@${a?.contract.version} into the target's integration as proposed`, { approval: "adopt-contract", step: "adopt-contract", inputs: [{ name: "action", label: "Action", required: true, value: "adopt-contract" }, { name: "subject", label: "Subject", required: true, ...(a ? { value: a.digest } : {}) }] });
       }
       break;
     }
@@ -300,7 +327,7 @@ export function advise(v: ProjectView): ProjectView["next"] {
     case "promotion-proposed": {
       const c = v.integrationChange;
       if (c?.state === "approved") add("apply-promotion", "Apply to isolated worktree", "adds exactly the approved files to an isolated worktree of the pinned revision", { approval: "modify-integration" });
-      else add("approve", "Approve integration change", `add ${c?.promotion.target.files.length ?? 0} files under ${c?.promotion.target.directory ?? ""} in an isolated worktree and verify them`, { approval: "modify-integration", inputs: [{ name: "action", label: "Action", required: true, value: "modify-integration" }, { name: "subject", label: "Subject", required: true, ...(c ? { value: c.promotion.digest } : {}) }] });
+      else add("approve", "Approve integration change", `add ${c?.promotion.target.files.length ?? 0} files under ${c?.promotion.target.directory ?? ""} in an isolated worktree and verify them`, { approval: "modify-integration", step: "apply-promotion", inputs: [{ name: "action", label: "Action", required: true, value: "modify-integration" }, { name: "subject", label: "Subject", required: true, ...(c ? { value: c.promotion.digest } : {}) }] });
       add("propose-promotion", "Propose again", "if the promotion plan or a promoted file changed");
       break;
     }
@@ -316,12 +343,12 @@ export function advise(v: ProjectView): ProjectView["next"] {
       if (!c?.commit) {
         const granted = v.approvals.find((x) => x.action === "commit" && x.status === "granted");
         if (granted) add("commit", "Commit locally", "commit the reviewed patch on a local branch of the isolated worktree; nothing is pushed", { approval: "commit" });
-        else add("approve", "Approve local commit", `commit exactly the reviewed patch ${c?.patch?.digest ?? ""} on a local branch of the isolated worktree; nothing is pushed`, { approval: "commit", inputs: [{ name: "action", label: "Action", required: true, value: "commit" }, { name: "subject", label: "Subject", required: true, ...(c?.patch ? { value: digestOf({ action: "commit", promotion: c.promotion.digest, patch: c.patch.digest }) } : {}) }] });
+        else add("approve", "Approve local commit", `commit exactly the reviewed patch ${c?.patch?.digest ?? ""} on a local branch of the isolated worktree; nothing is pushed`, { approval: "commit", step: "commit", inputs: [{ name: "action", label: "Action", required: true, value: "commit" }, { name: "subject", label: "Subject", required: true, ...(c?.patch ? { value: digestOf({ action: "commit", promotion: c.promotion.digest, patch: c.patch.digest }) } : {}) }] });
       } else {
         const subject = digestOf({ action: "pull-request", promotion: c.promotion.digest, patch: c.patch?.digest, commit: c.commit, branch: c.branch ?? null, base: p.repository.defaultBranch ?? null });
         const granted = v.approvals.find((x) => x.action === "pull-request" && x.subject === subject && x.status === "granted");
         if (granted) add("submit-review", "Submit for review", "needs the branch pushed to GitHub: @appport/github has no push contract, so this is refused after its approval check", { approval: "pull-request" });
-        else add("approve", "Approve submitting for review", "push the committed branch and open a pull request (not supported yet: the approval is recorded, the action is refused)", { approval: "pull-request", inputs: [{ name: "action", label: "Action", required: true, value: "pull-request" }, { name: "subject", label: "Subject", required: true, value: subject }] });
+        else add("approve", "Approve submitting for review", "push the committed branch and open a pull request (not supported yet: the approval is recorded, the action is refused)", { approval: "pull-request", step: "submit-review", inputs: [{ name: "action", label: "Action", required: true, value: "pull-request" }, { name: "subject", label: "Subject", required: true, value: subject }] });
       }
       break;
     }

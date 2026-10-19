@@ -14,7 +14,7 @@
  * A job record never decides anything: the project record and its evidence do.
  */
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { assessRepository, gitIdentity, verifyAssessment, type ApplicationAssessment } from "@appport/assessment";
@@ -29,7 +29,8 @@ import { adoptionProblems, proposeAdoption, type ContractAdoption } from "./adop
 import { buildPromotion, patchDigest, promotionProblems, readPromotionPlan, worktreeFileDigests, writePromotionFiles, type Promotion } from "./promotion.js";
 import { reconcile, type ExtractionBinding, type InventoryRecord, type MatchDecision } from "./reconcile.js";
 import { acquireCheckout, commitInfo, commitWorktree, createPromotionWorktree, worktreePatch, worktreeState, type RepositoryProvider } from "./repository.js";
-import { directoryDigest, listExtractions, runExtraction, runPromotionVerification, type ExtractionEntry } from "./runner.js";
+import { directoryDigest, installPackages, listExtractions, runExtraction, runPromotionVerification, startIntegration, type ExtractionEntry, type RunnerResult } from "./runner.js";
+import { proposeInstallation, type AppPortInstallation } from "./install.js";
 import { sha256, Store, type Write } from "./store.js";
 
 export interface WorkspaceOptions {
@@ -48,6 +49,8 @@ export interface WorkspaceOptions {
   fetch?: typeof globalThis.fetch;
   /** Origins to try first when discovering without an endpoint (APPWORKS_DISCOVERY_ORIGINS). */
   discoveryOrigins?: string[];
+  /** Installs an AppPort integration's packages (default: `npm install` with lifecycle scripts disabled). Tests. */
+  installPackages?: (directory: string, signal: AbortSignal) => Promise<RunnerResult>;
   runnerTimeoutMs?: number;
   /** Tests only: called at named points of a step; throwing `SimulatedCrash` stops the run as if the process died. */
   faultPoint?: (name: string, context: { project: string; worktree?: string }) => void;
@@ -101,6 +104,7 @@ export class Workspace {
   private readonly leaseMs: number;
   private readonly fetch: typeof globalThis.fetch | undefined;
   private readonly discoveryOrigins: string[];
+  private readonly installer: (directory: string, signal: AbortSignal) => Promise<RunnerResult>;
   private readonly runnerTimeoutMs: number | undefined;
   private readonly faultPoint: WorkspaceOptions["faultPoint"];
 
@@ -116,6 +120,7 @@ export class Workspace {
     this.leaseMs = options.leaseMs ?? 60_000;
     this.fetch = options.fetch;
     this.discoveryOrigins = options.discoveryOrigins ?? [];
+    this.installer = options.installPackages ?? ((directory, signal) => installPackages(directory, { signal }));
     this.runnerTimeoutMs = options.runnerTimeoutMs;
     this.faultPoint = options.faultPoint;
   }
@@ -429,12 +434,113 @@ export class Workspace {
     return this.begin(principal, id, "discover", { stage: startsFrom("discover"), input, resuming }, async ({ project: p, run }) => {
       this.assertRevision(p);
       const integration = await this.body<IntegrationRecord>(p.current.integration, "integration inspection");
+      const installed = p.current.integrationInstall ? await this.body<{ worktree: string; directory: string }>(p.current.integrationInstall, "AppPort installation") : undefined;
+      if (installed && !input.endpoint) {
+        // The integration AppWorks installed: started from its worktree for this discovery, and stopped after it.
+        const running = await startIntegration(join(this.store.resolve(installed.body.worktree), installed.body.directory));
+        let record: DiscoveryRecord;
+        try {
+          record = await discoverCapabilities({ endpoint: running.origin, integrationPresent: true, canonical: this.canonicalContracts(), now: this.now, ...(this.fetch ? { fetch: this.fetch } : {}) });
+        } finally {
+          await running.stop();
+        }
+        record = { ...record, note: `${record.note} Discovered on the AppPort integration AppWorks installed (${installed.record.id}), started from its isolated worktree for this discovery and stopped after it.` };
+        const { record: artifact, writes } = await this.existingOrWrite(p, "discovery", record, run, { format: record.format, summary: { outcome: record.outcome, capabilities: record.capabilities.length, installed: true } });
+        const partial: Reason[] = record.outcome === "unavailable" ? [{ code: "DISCOVERY_UNAVAILABLE", message: record.note }] : [];
+        return { writes, current: { discovery: artifact.id }, partial, evidence: [artifact.id, installed.record.id], note: `${record.outcome} on the installed integration: ${record.capabilities.length} capabilities; nothing invoked` };
+      }
       const present = integration.body.status === "present";
       const candidates = !input.endpoint && present ? endpointCandidates(this.store.resolve(p.revision!.checkout), { configured: this.discoveryOrigins, integrationRoots: integration.body.integrations.map((i) => i.root) }) : [];
       const record = await discoverCapabilities({ ...(input.endpoint ? { endpoint: input.endpoint.replace(/\/$/, "") } : {}), candidates, integrationPresent: present, canonical: this.canonicalContracts(), now: this.now, ...(this.fetch ? { fetch: this.fetch } : {}) });
       const { record: artifact, writes } = await this.existingOrWrite(p, "discovery", record, run, { format: record.format, summary: { outcome: record.outcome, capabilities: record.capabilities.length } });
       const partial: Reason[] = record.outcome === "unavailable" ? [{ code: "DISCOVERY_UNAVAILABLE", message: record.note }] : [];
       return { writes, current: { discovery: artifact.id }, partial, evidence: [artifact.id], note: `${record.outcome}${record.endpoint ? ` at ${record.endpoint}${record.resolution?.given ? "" : " (found from the source)"}` : ""}: ${record.capabilities.length} capabilities; nothing invoked` };
+    });
+  }
+
+  /**
+   * Proposes installing AppPort in a revision that has none: an AppPort application of its own in a new directory
+   * (`install.ts`). Nothing is written; the proposal's digest is what the `modify-integration` approval covers.
+   */
+  proposeIntegration(principal: Principal, id: string, resuming = false): Promise<Started> {
+    const guard = async (p: Project) => {
+      const integration = await this.body<IntegrationRecord>(p.current.integration, "integration inspection");
+      if (integration.body.status === "present") throw new WorkspaceError("INTEGRATION_PRESENT", `the revision already has an AppPort integration (${integration.body.integrations.map((i) => i.root).join(", ") || "configuration"}); discover it instead`);
+    };
+    return this.begin(principal, id, "propose-integration", { stage: startsFrom("propose-integration"), resuming, guard }, async ({ project: p, run }) => {
+      const checkout = this.assertRevision(p);
+      const proposal = proposeInstallation({ owner: p.repository.owner, name: p.repository.name, url: p.repository.url, revision: p.revision!.sha, checkout });
+      const { record, writes } = await this.existingOrWrite(p, "integration-proposal", proposal, run, { digest: proposal.digest, format: proposal.format, summary: { directory: proposal.directory, application: proposal.application.id, files: proposal.files.length } });
+      return { writes, current: { integrationProposal: record.id }, evidence: [record.id, proposal.digest], note: `proposed installing AppPort as ${proposal.application.id} under ${proposal.directory}/ (${proposal.files.length} files, ${proposal.digest}); nothing written` };
+    });
+  }
+
+  /**
+   * Installs the approved AppPort integration in an isolated worktree of the pinned revision: exactly the proposed
+   * files, its packages with lifecycle scripts disabled, then the integration started on loopback and discovered
+   * through AppPort's client, and stopped. Not verified, it fails with the evidence kept. The pinned checkout is never
+   * written; nothing is committed or pushed.
+   */
+  installIntegration(principal: Principal, id: string, resuming = false): Promise<Started> {
+    const action = STEPS["install-integration"]!.approval!;
+    const proposalOf = async (p: Project) => {
+      const proposal = await this.body<AppPortInstallation>(p.current.integrationProposal, "AppPort installation proposal");
+      const again = proposeInstallation({ owner: p.repository.owner, name: p.repository.name, url: p.repository.url, revision: p.revision!.sha, checkout: this.assertRevision(p) });
+      if (again.digest !== proposal.body.digest) throw new WorkspaceError("PROPOSAL_STALE", `the installation proposal ${proposal.body.digest} is no longer what the pinned revision gives (${again.digest}); propose it again`);
+      return proposal;
+    };
+    const guard = async (p: Project) => {
+      await this.requireApproval(principal, p, action, (await proposalOf(p)).body.digest);
+    };
+    return this.begin(principal, id, "install-integration", { stage: startsFrom("install-integration"), resuming, guard }, async ({ project: p, run, signal }) => {
+      const checkout = this.assertRevision(p);
+      const { record: proposalRecord, body: proposal } = await proposalOf(p);
+      const approval = await this.requireApproval(principal, p, action, proposal.digest);
+      const worktreePath = join("workspaces", p.id, p.revision!.sha, `appport-${proposal.digest.slice(7, 19)}`);
+      const worktree = this.store.resolve(worktreePath);
+      const approved = new Set(proposal.files.map((f) => f.path));
+      if (!existsSync(join(worktree, ".git"))) await createPromotionWorktree({ destination: worktree, pinnedCheckout: checkout, canonicalUrl: p.repository.url, sha: p.revision!.sha });
+      const before = await worktreeState(worktree);
+      if (before.head !== p.revision!.sha) throw new WorkspaceError("DESTINATION_DIRTY", `the worktree is at ${before.head ?? "no revision"}, not ${p.revision!.sha}`);
+      const unexpected = before.entries.filter((e) => !approved.has(e.path) && !e.path.startsWith(`${proposal.directory}/node_modules/`));
+      if (unexpected.length) throw new WorkspaceError("DESTINATION_DIRTY", `the worktree has unexpected changes: ${unexpected.map((e) => `${e.status.trim()} ${e.path}`).join(", ")}`);
+      await requireAllowed(this.authority, principal, `action:${action}`, { project: id });
+      mkdirSync(join(worktree, proposal.directory), { recursive: true });
+      for (const f of proposal.files) {
+        const path = join(worktree, f.path);
+        if (!existsSync(path) || `sha256:${sha256(readFileSync(path))}` !== f.sha256) writeFileSync(path, f.content);
+        if (`sha256:${sha256(readFileSync(path))}` !== f.sha256) throw new WorkspaceError("INSTALLATION_MISMATCH", `${f.path} is not the approved file`);
+      }
+      const patch = await worktreePatch(worktree, p.revision!.sha);
+      const installed = await this.installer(join(worktree, proposal.directory), signal);
+      const tail = (text: string) => text.slice(-4_000);
+      let discovery: DiscoveryRecord | undefined;
+      let failure: string | undefined;
+      if (installed.exitCode !== 0) failure = `installing ${Object.keys(proposal.packages).join(", ")} failed (exit ${installed.exitCode}${installed.timedOut ? ", timed out" : ""})`;
+      else {
+        try {
+          const running = await startIntegration(join(worktree, proposal.directory));
+          try {
+            discovery = await discoverCapabilities({ endpoint: running.origin, integrationPresent: true, now: this.now, ...(this.fetch ? { fetch: this.fetch } : {}) });
+          } finally {
+            await running.stop();
+          }
+          if (discovery.outcome !== "discovered") failure = `the installed integration did not verify through AppPort discovery (${discovery.state}: ${discovery.reasons.join(", ")})`;
+          else if (discovery.application?.id !== proposal.application.id) failure = `the installed integration identifies as ${discovery.application?.id}, not ${proposal.application.id}`;
+        } catch (error) {
+          failure = (error as Error).message;
+        }
+      }
+      const body = { format: "appworks.appport-install/1", proposal: proposal.digest, directory: proposal.directory, worktree: worktreePath, base: p.revision!.sha, files: proposal.files.map(({ content: _c, ...f }) => f), patch, packages: { exitCode: installed.exitCode, timedOut: installed.timedOut, output: tail(installed.output) }, ...(discovery ? { discovery: { origin: discovery.endpoint, state: discovery.state, application: discovery.application, capabilities: discovery.capabilities.length, reasons: discovery.reasons } } : {}), verified: !failure, ...(failure ? { failure } : {}) };
+      const stored = await this.existingOrWrite(p, "integration-install", body, run, { summary: { verified: !failure, directory: proposal.directory, worktree: worktreePath } });
+      this.assertRevision(p);
+      if (failure) throw new WorkspaceError("INTEGRATION_NOT_VERIFIED", failure, { writes: stored.writes });
+      return {
+        writes: [...stored.writes, this.consume(approval, run)],
+        current: { integrationInstall: stored.record.id },
+        evidence: [stored.record.id, proposalRecord.id, approval.id],
+        note: `installed AppPort as ${proposal.application.id} under ${proposal.directory}/ in an isolated worktree; it serves AppPort discovery; nothing committed or pushed`
+      };
     });
   }
 
@@ -583,6 +689,10 @@ export class Workspace {
     if (action === "adopt-contract") {
       const a = await this.body<ContractAdoption>(p.current.adoption, "contract-adoption proposal");
       return { subject: a.body.digest, description: `Adopt ${a.body.contract.application} ${a.body.contract.capability}@${a.body.contract.version} (${a.body.contract.capabilityDigest}) into ${p.repository.owner}/${p.repository.name}'s AppPort integration, as proposed: ${a.body.differences.length} differences, ${a.body.questions.length} questions, ${a.body.blocking.length} blocking. Adoption grants no authority and registers nothing.` };
+    }
+    if (action === "modify-integration" && !p.current.promotionArtifact && p.current.integrationProposal) {
+      const i = await this.body<AppPortInstallation>(p.current.integrationProposal, "AppPort installation proposal");
+      return { subject: i.body.digest, description: `Install AppPort in ${p.repository.owner}/${p.repository.name}: add ${i.body.files.length} files under ${i.body.directory}/ (${i.body.files.map((f) => f.path).join(", ")}) to an isolated worktree at ${i.body.target.revision.slice(0, 12)}, install ${Object.entries(i.body.packages).map(([k, v]) => `${k}@${v}`).join(", ")} with lifecycle scripts disabled, and start it on loopback to check it serves AppPort discovery as ${i.body.application.id}. No existing file is modified; nothing is committed, pushed or deployed.` };
     }
     if (action === "modify-integration") {
       const a = await this.body<Promotion>(p.current.promotionArtifact, "promotion artifact");
@@ -843,6 +953,10 @@ export class Workspace {
         return this.pin(principal, id, resuming);
       case "inspect":
         return this.inspect(principal, id, resuming);
+      case "propose-integration":
+        return this.proposeIntegration(principal, id, resuming);
+      case "install-integration":
+        return this.installIntegration(principal, id, resuming);
       case "discover":
         return this.discover(principal, id, s("endpoint") ? { endpoint: s("endpoint")! } : {}, resuming);
       case "assess":

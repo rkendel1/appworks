@@ -356,7 +356,18 @@
           claims: c.claims.length ? c.claims.map((x) => x.claim.contract + ' ' + x.claim.capability + '@' + x.claim.version + ': ' + x.evaluation).join('; ') : 'none',
         } })), d.outcome === 'no-integration' ? 'No AppPort integration: nothing to discover' : 'No capabilities discovered')]
         : [pending('Not discovered', 'Discovery asks a running instance, through AppPort\'s client, what it advertises.')];
-      out.push(section('integration', 'AppPort integration', [...integration, el('h3', {}, 'Discovery'), ...discovery]));
+      const inst = v.installation;
+      const installation = inst ? [el('h3', {}, 'Installing AppPort'), S.dom.MetadataList({ items: [
+        { label: 'State', value: tone(inst.state, { proposed: 'attention', installed: 'positive' }) },
+        { label: 'Application', value: inst.application.id, mono: true },
+        { label: 'Directory', value: inst.directory + '/ (new; no existing file changes)', mono: true },
+        { label: 'Packages', value: Object.entries(inst.packages).map(([k, x]) => k + '@' + x).join(', ') + ' (lifecycle scripts disabled)' },
+        { label: 'Proposal', value: inst.digest, mono: true },
+        ...(inst.install ? [{ label: 'Worktree', value: inst.install.worktree, mono: true }, { label: 'Checked', value: inst.install.verified ? 'serves AppPort discovery' + (inst.install.discovery && inst.install.discovery.state ? ' (' + inst.install.discovery.state + ')' : '') : 'not verified' }] : []),
+      ] }), el('p', { class: 'appworks-muted' }, inst.description),
+      table('Files to add', [{ id: 'path', header: 'File' }, { id: 'role', header: 'Role' }, { id: 'sha', header: 'SHA-256' }], inst.files.map((f) => ({ key: f.path, cells: { path: code(f.path), role: f.role, sha: code(f.sha256.slice(0, 19) + '…') } }))),
+      inst.install ? el('details', { class: 'appworks-diff' }, [el('summary', {}, 'Patch'), el('pre', {}, inst.install.patch)]) : null] : [];
+      out.push(section('integration', 'AppPort integration', [...integration, ...installation, el('h3', {}, 'Discovery'), ...discovery]));
 
       const a = v.assessment;
       out.push(section('assessment', 'Assessment', a ? [

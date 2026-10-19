@@ -38,7 +38,8 @@ and the boundaries it enforces. The code is in `packages/workspace`; the durable
 
 The stages, in order (`workflow transformation` in `feltdb.flow`; each step's `to`):
 
-`project-selected` → `repository-acquired` → `revision-pinned` → `integration-inspected` → `capabilities-discovered` →
+`project-selected` → `repository-acquired` → `revision-pinned` → `integration-inspected` → (`integration-proposed` →
+`integration-installed`, only for a revision without an AppPort integration) → `capabilities-discovered` →
 `assessment-completed` → `inventory-reconciled` → `candidate-selected` → `extraction-planned` → `awaiting-approval` →
 `extraction-executed` → `verification-completed` → `ready-for-promotion` → `contract-proposed` → `contract-adopted` →
 `promotion-proposed` → `promotion-applied` → `promotion-verified` → `ready-for-review` → `submitted-for-review`
@@ -48,7 +49,9 @@ The stages, in order (`workflow transformation` in `feltdb.flow`; each step's `t
 | `acquire` | `project-selected` | the provider resolves the ref to one commit | isolated checkout of exactly that commit; whether it is on the default branch |
 | `pin` | `repository-acquired` | the checkout's HEAD is the resolved SHA | the checkout's content hash (every path, mode, mtime and byte, `.git` included) |
 | `inspect` | `revision-pinned` | the checkout is unchanged since pinning | AppPort integration present or absent, with file evidence |
-| `discover` | `integration-inspected` (re-run at `capabilities-discovered`) | as above | outcome `discovered`, `no-integration` or `unavailable`; capabilities, interfaces, claims |
+| `propose-integration` | `integration-inspected` (re-run at `integration-proposed`) | no AppPort integration in the revision | an AppPort installation proposal (§4a) and its digest; nothing written |
+| `install-integration` | `integration-proposed` | re-deriving the proposal gives the same digest; a `modify-integration` approval of it; the pinned checkout unchanged; the destination clean | the files in an isolated worktree, the patch, the package install, the integration started and discovered; the approval consumed. Not verified: failed, evidence kept, approval unused |
+| `discover` | `integration-inspected`, `integration-installed` (re-run at `capabilities-discovered`) | as above | outcome `discovered`, `no-integration` or `unavailable`; capabilities, interfaces, claims; how the origin was found (given, probed from the source, or the installed integration started) |
 | `assess` | `capabilities-discovered` | as above; the assessment verifies and names the pinned SHA | assessment reference and digest; partial coverage |
 | `reconcile` | `assessment-completed` (re-run until a candidate is planned) | current assessment and discovery | inventory (§5) |
 | `select` | `inventory-reconciled` (re-run until approval) | the candidate is in the current assessment and eligible (`candidateRefusals`) | selection decision |
@@ -100,6 +103,24 @@ repeated. An action whose external effect was recorded on a run (a pull request)
   discovery record lists every probe and the source lines behind it; an origin given by a person overrides the search.
 * **Nothing from the repository is executed** by acquisition, inspection, discovery, assessment or reconciliation. The only step that
   runs anything is `execute`, which runs the reviewed extraction's runner after its approval.
+
+## 4a. Installing AppPort (`appworks.appport-installation/1`)
+
+A revision without an AppPort integration can get one before discovery, so that its capabilities have somewhere to be published.
+
+* **Proposal** (`install.ts`, a pure function of the repository identity and the pinned files): a new directory (`appport/`, or the
+  first free of a short list) holding an AppPort application of its own: `package.json` pinning `@appport/sdk` at the version the
+  workspace tests against, `server.mjs` (public discovery, loopback only, no capability yet, `APPPORT_PORT` overriding a default port the
+  source does not already name), `.env.example`, `.gitignore`, `README.md`. Application id `com.<github|git>.<owner>.<name>`. No existing
+  file is changed. The digest covers every file's bytes, and is the subject of the `modify-integration` approval.
+* **Install** (approved): exactly those files are written to an isolated worktree of the pinned revision (never the pinned checkout),
+  the patch is recorded, the packages are installed with `npm install --ignore-scripts` (no package code runs; only npm's own
+  configuration is passed to it), the integration is started on a free loopback port with the allow-listed environment, discovered
+  through AppPort's client, and stopped. It must verify as the proposed application; otherwise the step fails with the install record
+  (output, discovery state) kept and the approval unused.
+* **Discovery** of an installed integration starts it from its worktree for the discovery and stops it after.
+* Nothing is committed or pushed. A promotion still targets an isolated worktree of the pinned revision: carrying an extracted
+  capability into the newly installed integration is not done yet.
 
 ## 5. Reconciliation
 

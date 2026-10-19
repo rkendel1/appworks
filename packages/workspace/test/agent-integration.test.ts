@@ -1,11 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createFeltDB, parseFlowSpec } from "@feltdb/core";
-import { agentService, AgentRuntime, createWorkspaceServer, deterministicAgent, endpointCandidates, main, MODEL, Store, type AgentView, type DiscoveryRecord } from "../src/index.js";
+import { agentService, AgentRuntime, eligibleActions, APPPORT_SDK_VERSION, createWorkspaceServer, deterministicAgent, endpointCandidates, main, MODEL, projectView, proposeInstallation, Store, type AgentView, type AppPortInstallation, type DiscoveryRecord } from "../src/index.js";
 import { application } from "./application.js";
-import { extractionsRoot, notesRepository, openWorkspace, OPERATOR, step, tempDir } from "./helpers.js";
+import { extractionsRoot, linkPackages, notesRepository, openWorkspace, OPERATOR, step, tempDir } from "./helpers.js";
 
 async function project(ws: Awaited<ReturnType<typeof openWorkspace>>, mirror: string): Promise<string> {
   return (await ws.createProject(OPERATOR, { provider: "git", owner: "example", name: "notes", url: "https://github.com/example/notes", fetchFrom: mirror, ref: "" })).id;
@@ -99,8 +99,8 @@ describe("an older workspace home", () => {
     try {
       expect((await ws.project(OPERATOR, id)).stage).toBe("integration-inspected");
       const run = await (await new AgentRuntime(ws, { leaseMs: 2_000 }).start(OPERATOR, id, { agent: deterministicAgent() })).done;
-      expect(run.status).toBe("paused");
-      expect((await ws.project(OPERATOR, id)).stage).toBe("awaiting-approval");
+      expect(run).toMatchObject({ status: "paused", pause: { approval: "modify-integration" } });
+      expect((await ws.project(OPERATOR, id)).stage).toBe("integration-proposed");
     } finally {
       await ws.close();
     }
@@ -129,7 +129,7 @@ describe("the agent from the CLI and the web workspace", () => {
     const ran = await cli(["agent", "run", id, "--agent", "deterministic"]);
     expect(ran.code).toBe(0);
     expect(ran.out).toMatch(/run .*\.agent\.1: paused; agent deterministic/);
-    expect(ran.out).toMatch(/appworks project approve .* --action generate-files --subject sha256:/);
+    expect(ran.out).toMatch(/appworks project approve .* --action modify-integration --subject sha256:/);
     // A second run on the held project is refused.
     expect((await cli(["agent", "run", id, "--agent", "deterministic"])).err).toMatch(/AGENT_RUN_PAUSED/);
     const cliView = JSON.parse((await cli(["agent", "status", id, "--json"])).out) as AgentView;
@@ -156,4 +156,86 @@ describe("the agent from the CLI and the web workspace", () => {
     expect(after.out).toMatch(/: cancelled; agent deterministic/);
     expect(after.out).toMatch(/outcome: stopped by local:operator: from the page/);
   }, 60_000);
+});
+
+describe("installing AppPort in a revision that has none", () => {
+  it("proposes the same files from the same revision, adds them only to an isolated worktree, and keeps a failed install's evidence", async () => {
+    const { mirror } = notesRepository();
+    let fail = true;
+    const ws = await openWorkspace({ installPackages: async (directory) => (fail ? { exitCode: 1, signal: null, timedOut: false, output: "E404 not found" } : linkPackages(directory)) });
+    try {
+      const id = await project(ws, mirror);
+      for (const s of ["acquire", "pin", "inspect", "propose-integration"]) await step(ws, OPERATOR, id, s);
+      const p = await ws.project(OPERATOR, id);
+      const proposal = (await ws.artifact<AppPortInstallation>(OPERATOR, p.current.integrationProposal))!.body;
+      const checkout = ws.store.resolve(p.revision!.checkout);
+      expect(proposal).toMatchObject({ directory: "appport", application: { id: "com.github.example.notes" }, packages: { "@appport/sdk": APPPORT_SDK_VERSION } });
+      expect(proposeInstallation({ owner: "example", name: "notes", url: "https://github.com/example/notes", revision: p.revision!.sha, checkout }).digest).toBe(proposal.digest);
+      expect(proposal.files.map((f) => f.path)).toEqual(["appport/package.json", "appport/server.mjs", "appport/.env.example", "appport/.gitignore", "appport/README.md"]);
+      // Not approved: refused before anything is written.
+      await expect(ws.dispatch(OPERATOR, id, "install-integration", {})).rejects.toMatchObject({ code: "APPROVAL_REQUIRED" });
+      const { subject } = await ws.approvalSubject(OPERATOR, id, "modify-integration");
+      expect(subject).toBe(proposal.digest);
+      await ws.approve(OPERATOR, id, { action: "modify-integration", subject });
+      await expect(step(ws, OPERATOR, id, "install-integration")).rejects.toMatchObject({ code: "INTEGRATION_NOT_VERIFIED" });
+      const failed = await ws.project(OPERATOR, id);
+      expect(failed.condition.state).toBe("failed");
+      const evidence = (await ws.records<{ kind: string; summary: { verified: boolean } }>(OPERATOR, "Artifact", id)).filter((a) => a.kind === "integration-install");
+      expect(evidence.map((a) => a.summary.verified)).toEqual([false]);
+      // The approval was not used up by the failed install; resuming installs again, now with packages.
+      fail = false;
+      expect((await (await ws.resume(OPERATOR, id)).done).stage).toBe("integration-installed");
+      expect((await ws.records<{ action: string; status: string }>(OPERATOR, "Approval", id)).map((a) => [a.action, a.status])).toEqual([["modify-integration", "consumed"]]);
+      expect(existsSync(join(checkout, "appport"))).toBe(false); // the pinned checkout is never written
+      expect((await step(ws, OPERATOR, id, "discover")).stage).toBe("capabilities-discovered");
+      expect(APPPORT_SDK_VERSION).toBe(JSON.parse(readFileSync(join(import.meta.dirname, "..", "package.json"), "utf8")).devDependencies["@appport/sdk"]);
+    } finally {
+      await ws.close();
+    }
+  }, 60_000);
+
+  it("is a person's action too: the CLI and the web workspace install through the same table", async () => {
+    const { mirror } = notesRepository();
+    const home = tempDir("ws-cli-");
+    const out: string[] = [];
+    const cli = async (argv: string[]) => {
+      out.length = 0;
+      const code = await main(argv, { out: (t) => void out.push(t), err: () => {} }, { home, principal: OPERATOR, env: {} });
+      return { code, out: out.join("\n") };
+    };
+    const id = JSON.parse((await cli(["project", "create", "--git", mirror, "--owner", "example", "--name", "notes", "--json"])).out).id as string;
+    for (const s of ["acquire", "pin", "inspect", "propose-integration"]) expect((await cli(["project", s, id])).code, s).toBe(0);
+    const subject = JSON.parse((await cli(["project", "approval-subject", id, "--action", "modify-integration", "--json"])).out).subject as string;
+    expect((await cli(["project", "approve", id, "--action", "modify-integration", "--subject", subject])).code).toBe(0);
+    const ws = await openWorkspace({ home });
+    const server = createWorkspaceServer({ workspace: ws, principal: OPERATOR, port: 0 });
+    const origin = await server.listen();
+    try {
+      const view = (await (await fetch(`${origin}/api/projects/${id}`)).json()) as { next: { actions: Array<{ action: string }> } };
+      expect(view.next.actions[0]!.action).toBe("install-integration");
+      const started = await fetch(`${origin}/api/projects/${id}/actions/install-integration`, { method: "POST", headers: { "content-type": "application/json", "x-appworks-request": "1" }, body: "{}" });
+      expect(started.status).toBe(202);
+      for (let i = 0; i < 100 && (await ws.project(OPERATOR, id)).stage !== "integration-installed"; i++) await new Promise((r) => setTimeout(r, 100));
+      expect((await ws.project(OPERATOR, id)).stage).toBe("integration-installed");
+    } finally {
+      await server.close();
+      await ws.close();
+    }
+  }, 60_000);
+
+  it("is not proposed for a revision that already has an AppPort integration", async () => {
+    const { mirror } = notesRepository({ "bridge/package.json": JSON.stringify({ name: "b", dependencies: { "@appport/sdk": "1.2.2" } }) });
+    const ws = await openWorkspace();
+    try {
+      const id = await project(ws, mirror);
+      for (const s of ["acquire", "pin", "inspect"]) await step(ws, OPERATOR, id, s);
+      expect((await projectView(ws, OPERATOR, id)).next.actions.map((a) => a.action)).not.toContain("propose-integration");
+      await expect(ws.dispatch(OPERATOR, id, "propose-integration", {})).rejects.toMatchObject({ code: "INTEGRATION_PRESENT" });
+      // Refused before any run: the project is not failed, and the agent is not even offered it.
+      expect((await ws.project(OPERATOR, id)).condition.state).toBe("active");
+      expect(eligibleActions(await projectView(ws, OPERATOR, id)).specs.map((a) => a.id)).not.toContain("workflow.propose-integration@1");
+    } finally {
+      await ws.close();
+    }
+  });
 });

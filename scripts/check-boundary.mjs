@@ -22,7 +22,8 @@
 //    stack's GitHub integration) and @feltdb/core (its only durable state), all published ones at exact versions; never
 //    on @appport/core, @appport/services or a second database or scheduler. @appport/sdk is a test-only dependency (a
 //    real application to discover). Processes run in two places only: git, against the isolated checkout
-//    (src/repository.ts), and the approved extraction runner (src/runner.ts); only src/server.ts serves HTTP. Its schema
+//    (src/repository.ts), and src/runner.ts (the approved extraction runner; installing, with scripts disabled, and
+//    starting an approved AppPort integration in its isolated worktree); only src/server.ts serves HTTP. Its schema
 //    and workflow are its feltdb.flow, and nothing below it (assessment, extraction, recipe) depends on it.
 //    Its agent runtime may also depend on @appport/schema (validating decisions) and on two model providers' SDKs,
 //    @anthropic-ai/sdk and openai, each imported by its own adapter (src/agent/providers/<provider>.ts) and nowhere

@@ -110,8 +110,12 @@ pnpm appworks agent run <project> --agent deterministic   # no model: follows th
 Providers: `anthropic` (`ANTHROPIC_API_KEY`), `openai` (`OPENAI_API_KEY`), `deterministic`. Keys come from the environment or an
 optional `.env.local` in the working directory (or `--env-file`), which is read and never printed or stored. The web workspace has the
 same controls in its Agent section. Discovery finds a running application from the ports its source names, so no origin needs typing.
+A repository without an AppPort integration gets one: the agent proposes an AppPort application in a new directory and, once a person
+approves it, AppWorks adds it to an isolated worktree, installs its packages (scripts disabled), starts it and discovers it, then
+continues.
 `APPWORKS_LIVE_ANTHROPIC_MODEL=<m>` / `APPWORKS_LIVE_OPENAI_MODEL=<m>` with a key enable the live adapter checks in
-`test/agent-conformance.test.ts`; `APPWORKS_AIDER_E2E=1` runs the agent on Aider-AI/aider (network).
+`test/agent-conformance.test.ts`; `APPWORKS_AIDER_E2E=1` runs the agent on Aider-AI/aider (network: it installs AppPort there,
+discovers it, and stops where the evidence does: Python is not assessed, so there is no candidate).
 
 `APPWORKS_MEMOS_E2E=1 APPWORKS_MEMOS_REPO=<checkout> pnpm vitest run packages/workspace/test/memos-e2e.test.ts` runs the same Memos
 through the project workspace end to end (acquisition through `@appport/github`, discovery of the running bridge, assessment,

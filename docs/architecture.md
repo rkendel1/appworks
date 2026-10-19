@@ -74,8 +74,9 @@ anything else      ──✗──→ @appport/workspace
 8. **The workspace orchestrates; it does not re-implement.** `@appport/workspace` keeps all durable state in FeltDB 0.12.0, modelled
    by its `feltdb.flow` (deployed, and enforced on every write). It resolves repositories through `@appport/github`, discovers through
    `@appport/client`, assesses, validates plans and verifies through `@appport/assessment` and `@appport/extraction`, and runs only the
-   reviewed extraction runner, after an approval. Processes run in `src/repository.ts` (git, against its own isolated checkout) and
-   `src/runner.ts` only; only `src/server.ts` serves HTTP, on loopback. It is private: `@appport/github` 1.0.2 brings a second, older
+   reviewed extraction runner, after an approval, and, after its own approval, an AppPort integration it installed (packages installed
+   with scripts disabled, started on loopback in an isolated worktree). Processes run in `src/repository.ts` (git, against its own
+   isolated checkout) and `src/runner.ts` only; only `src/server.ts` serves HTTP, on loopback. It is private: `@appport/github` 1.0.2 brings a second, older
    AppPort stack, which a published library must not.
    Its agent runtime (`src/agent/`) adds `@appport/schema` (validating decisions) and two model providers' SDKs, `@anthropic-ai/sdk`
    and `openai`, each imported only by its own adapter (`src/agent/providers/<provider>.ts`): the orchestrator, the action registry and

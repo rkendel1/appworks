@@ -70,6 +70,7 @@ const pinned = (view: ProjectView) => Boolean(view.project.revision?.treeDigest)
 const SIDE_EFFECT: Record<string, SideEffect> = {
   acquire: "external-read",
   discover: "external-read",
+  "install-integration": "isolated-write",
   execute: "executes-target-code",
   verify: "executes-target-code",
   "apply-promotion": "isolated-write",
@@ -81,7 +82,9 @@ const DESCRIPTION: Record<string, string> = {
   acquire: "Resolve the project's ref to one commit through its repository provider and fetch exactly that commit into an isolated checkout. Nothing runs.",
   pin: "Confirm the checkout's HEAD is the resolved commit and record its content hash.",
   inspect: "Look for an existing AppPort integration in the pinned files. Static; nothing runs.",
-  discover: "Ask a running instance of the application what it advertises, through AppPort's client. Without an endpoint, discovery is recorded as unavailable (no application is started).",
+  "propose-integration": "Propose installing AppPort in a revision that has no AppPort integration: an AppPort application of its own in a new directory, publishing discovery. Nothing is written.",
+  "install-integration": "Install the proposed AppPort integration in an isolated worktree of the pinned revision: write exactly the proposed files, install its pinned packages with lifecycle scripts disabled, start it on loopback and check it serves AppPort discovery. Needs the modify-integration approval of the proposal, granted by a person.",
+  discover: "Ask a running instance of the application what it advertises, through AppPort's client. Without an endpoint, the ports the pinned source names are probed on loopback (an integration AppWorks installed is started for the discovery and stopped after it); if nothing answers, discovery is recorded as unavailable with every origin tried.",
   assess: "Statically assess the pinned revision: candidate capabilities, readiness, questions. Nothing runs.",
   reconcile: "Join discovered capabilities and assessed candidates into an inventory with graded evidence.",
   select: "Select one assessed candidate for extraction, with a rationale. Only candidates that have a reviewed extraction can be planned.",
@@ -126,6 +129,7 @@ function workflowAction(step: string): ActionDefinition {
       if (p.condition.state === "cancelled") return false;
       if (step === "resume") return p.condition.state === "failed" || Boolean(p.activeRun?.expired);
       if (!live(view) || p.activeRun || p.condition.state === "failed") return false;
+      if (step === "propose-integration" && view.integration?.status !== "absent") return false;
       if (step === "commit") return p.stage === "ready-for-review" && Boolean(view.integrationChange && !view.integrationChange.commit);
       const s = STEPS[step];
       return Boolean(s && [...s.from, ...s.rerun].includes(p.stage));

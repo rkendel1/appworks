@@ -8,7 +8,8 @@
  * writes to the checkout. It runs as a child process with an allow-listed environment: no repository credential, no
  * workspace variable, and nothing from the project's records.
  */
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcessByStdio } from "node:child_process";
+import type { Readable } from "node:stream";
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readFileSync, readdirSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
@@ -92,8 +93,11 @@ export function runPromotionVerification(entry: ExtractionEntry, runner: string,
 
 function runScript(cwd: string, script: string, args: string[], input: { timeoutMs?: number; signal?: AbortSignal; onOutput?: (chunk: string) => void }): Promise<RunnerResult> {
   const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => ALLOWED_ENV.test(k)));
+  return collect(spawn(process.execPath, [script, ...args], { cwd, env, stdio: ["ignore", "pipe", "pipe"] }), { ...input, timeoutMs: input.timeoutMs ?? 30 * 60_000 }, "the extraction runner");
+}
+
+function collect(child: ChildProcessByStdio<null, Readable, Readable>, input: { timeoutMs: number; signal?: AbortSignal; onOutput?: (chunk: string) => void }, what: string): Promise<RunnerResult> {
   return new Promise((done, fail) => {
-    const child = spawn(process.execPath, [script, ...args], { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
     const chunks: string[] = [];
     let size = 0;
     const keep = (data: Buffer) => {
@@ -109,17 +113,78 @@ function runScript(cwd: string, script: string, args: string[], input: { timeout
     const timer = setTimeout(() => {
       timedOut = true;
       child.kill("SIGTERM");
-    }, input.timeoutMs ?? 30 * 60_000);
+    }, input.timeoutMs);
     const abort = () => child.kill("SIGTERM");
     input.signal?.addEventListener("abort", abort, { once: true });
     child.on("error", (error) => {
       clearTimeout(timer);
-      fail(new WorkspaceError("RUNNER_FAILED", `the extraction runner could not start: ${error.message}`));
+      fail(new WorkspaceError("RUNNER_FAILED", `${what} could not start: ${error.message}`));
     });
     child.on("close", (exitCode, signal) => {
       clearTimeout(timer);
       input.signal?.removeEventListener("abort", abort);
       done({ exitCode, signal, output: chunks.join(""), timedOut });
+    });
+  });
+}
+
+// ---- an installed AppPort integration --------------------------------------------------------------------------
+
+/** npm's own configuration (registry, cache, CA) is passed to the package installer, and to nothing else. */
+const INSTALL_ENV = /^(npm_config_[a-z_]+|NPM_CONFIG_[A-Z_]+)$/;
+
+/**
+ * Installs an AppPort integration's pinned packages: `npm install` with lifecycle scripts disabled, so no package code
+ * runs while installing. Never throws for a failed install (that is a result).
+ */
+export function installPackages(directory: string, input: { timeoutMs?: number; signal?: AbortSignal; npm?: string } = {}): Promise<RunnerResult> {
+  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => ALLOWED_ENV.test(k) || INSTALL_ENV.test(k)));
+  return collect(spawn(input.npm ?? "npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund", "--no-package-lock", "--omit=dev"], { cwd: directory, env, stdio: ["ignore", "pipe", "pipe"] }), { timeoutMs: input.timeoutMs ?? 10 * 60_000, ...(input.signal ? { signal: input.signal } : {}) }, "the package installer");
+}
+
+export interface RunningIntegration {
+  origin: string;
+  output(): string;
+  stop(): Promise<void>;
+}
+
+/**
+ * Starts an installed AppPort integration (`node server.mjs` in its directory) on a free loopback port, with the
+ * allow-listed environment and nothing else, and resolves with its origin once it says where it listens.
+ */
+export function startIntegration(directory: string, input: { timeoutMs?: number } = {}): Promise<RunningIntegration> {
+  const env = { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => ALLOWED_ENV.test(k))), APPPORT_PORT: "0" };
+  const child = spawn(process.execPath, ["server.mjs"], { cwd: directory, env, stdio: ["ignore", "pipe", "pipe"] });
+  let output = "";
+  const exited = new Promise<void>((done) => child.once("close", () => done()));
+  const stop = async () => {
+    if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
+    const timer = setTimeout(() => child.kill("SIGKILL"), 5_000);
+    await exited;
+    clearTimeout(timer);
+  };
+  return new Promise((done, fail) => {
+    const timer = setTimeout(() => {
+      void stop();
+      fail(new WorkspaceError("INTEGRATION_NOT_STARTED", `the installed integration did not report where it listens within ${input.timeoutMs ?? 30_000}ms: ${output.slice(-2_000)}`));
+    }, input.timeoutMs ?? 30_000);
+    const read = (data: Buffer) => {
+      output = (output + data.toString("utf8")).slice(-64 * 1024);
+      const m = /\bon (http:\/\/127\.0\.0\.1:\d+)/.exec(output);
+      if (m) {
+        clearTimeout(timer);
+        done({ origin: m[1]!, output: () => output, stop });
+      }
+    };
+    child.stdout.on("data", read);
+    child.stderr.on("data", read);
+    child.once("error", (error) => {
+      clearTimeout(timer);
+      fail(new WorkspaceError("INTEGRATION_NOT_STARTED", `the installed integration could not start: ${error.message}`));
+    });
+    child.once("close", (code) => {
+      clearTimeout(timer);
+      fail(new WorkspaceError("INTEGRATION_NOT_STARTED", `the installed integration exited (${code}) before listening: ${output.slice(-2_000)}`));
     });
   });
 }

@@ -34,9 +34,10 @@ Options: `--home <dir>` (`APPWORKS_HOME`, default `~/.appworks`), `--extractions
 | `src/repository.ts` | ref resolution through `@appport/github` (or git), isolated acquisition by SHA, credentials by reference only |
 | `src/discovery.ts` | discovery through `@appport/client` (`discoverApplication`), claims through `claimsFor` / `evaluateFulfillment` |
 | `src/inspect.ts`, `src/reconcile.ts` | static integration inspection; the graded inventory |
-| `src/runner.ts` | reviewed extraction directories and their runner contract (`scripts/extract.mjs --repo --output`) |
+| `src/runner.ts` | reviewed extraction directories and their runner contract (`scripts/extract.mjs --repo --output`); installing and starting an installed AppPort integration |
 | `src/view.ts`, `src/actions.ts` | the project view and the action table shared by the web workspace and the CLI; the deterministic advisor |
 | `src/server.ts`, `src/ui.ts`, `ui/` | the web workspace: stack-ui pages, JSON API |
+| `src/install.ts` | installing AppPort in a revision without an integration: the proposal (files, digest) |
 | `src/endpoints.ts` | finding a running instance: loopback origins from the ports the pinned source names |
 | `src/agent/contract.ts` | `appworks.agent/1`: request, response, decision, adapter, errors, validation, redaction |
 | `src/agent/actions.ts` | the action registry: workflow steps through `dispatch`, bounded reads of the pinned checkout and evidence |

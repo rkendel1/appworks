@@ -6,13 +6,12 @@
  */
 import { RESPONSE_FORMAT, type AgentAdapter, type AgentDecision, type AgentRequest, type AgentResponse } from "../contract.js";
 
-/** An advisor `approve` of an approval class → the step whose boundary needs it. */
-const GATED: Record<string, string> = { "generate-files": "execute", "adopt-contract": "adopt-contract", "modify-integration": "apply-promotion", commit: "commit" };
-
 interface Advised {
   action: string;
   reason: string;
   approval?: string;
+  /** For an advised approval: the step it lets run (requesting that step pauses for the approval). */
+  step?: string;
   values?: Record<string, string>;
 }
 
@@ -36,7 +35,7 @@ function decideFor(request: AgentRequest): AgentDecision {
   const unmet: string[] = [];
   for (const advised of context.advisor?.actions ?? []) {
     if (advised.action === "cancel") continue;
-    const step = advised.action === "approve" ? (advised.approval ? GATED[advised.approval] : undefined) : advised.action;
+    const step = advised.action === "approve" ? advised.step : advised.action;
     if (!step) continue;
     const id = `workflow.${step}@1`;
     if (!offered.has(id) || id === lastSucceeded) continue;

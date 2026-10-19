@@ -129,7 +129,7 @@ export interface Run {
   __version?: number;
 }
 
-export type ArtifactKind = "integration" | "discovery" | "assessment" | "inventory" | "plan" | "extraction" | "verification-log" | "adoption" | "promotion" | "patch" | "promotion-verification" | "promotion-log";
+export type ArtifactKind = "integration" | "integration-proposal" | "integration-install" | "discovery" | "assessment" | "inventory" | "plan" | "extraction" | "verification-log" | "adoption" | "promotion" | "patch" | "promotion-verification" | "promotion-log";
 
 /** A content-addressed file under the workspace home, referenced from FeltDB by digest. */
 export interface ArtifactRecord {
