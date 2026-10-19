@@ -60,6 +60,60 @@ describe("the appworks CLI", () => {
     }
   });
 
+  it("carries a promotion through the CLI with the subjects the advisor offers, and shows what the web API shows", async () => {
+    const { mirror, work } = notesRepository();
+    const ex = extractionsRoot(work);
+    const home = tempDir("ws-cli-");
+    const env = { home, extractions: ex.root };
+    const id = JSON.parse((await cli(["project", "create", "--git", mirror, "--owner", "example", "--name", "notes", "--url", "https://github.com/example/notes", "--ref", "main", "--json"], env)).out).id as string;
+    const run = async (...argv: string[]) => {
+      const r = await cli(["project", ...argv], env);
+      expect(r.code, `${argv.join(" ")}: ${r.err}`).toBe(0);
+      return r;
+    };
+    // Approves through the subject the advisor offers, after checking it is the workflow's own.
+    const approveAsAdvised = async (action: string) => {
+      const view = JSON.parse((await run("show", id, "--json")).out) as ProjectView;
+      const offered = view.next.actions.find((a) => a.action === "approve" && a.approval === action)!;
+      const subject = offered.inputs!.find((i) => i.name === "subject")!.value!;
+      expect(JSON.parse((await run("approval-subject", id, "--action", action, "--json")).out).subject, action).toBe(subject);
+      await run("approve", id, "--action", action, "--subject", subject);
+    };
+    for (const s of ["acquire", "pin", "inspect", "discover", "assess", "reconcile"]) await run(s, id);
+    await run("select", id, "--candidate", CANDIDATE);
+    await run("plan", id);
+    await run("request-approval", id);
+    await approveAsAdvised("generate-files");
+    for (const s of ["execute", "verify", "ready", "propose-contract"]) await run(s, id);
+    await approveAsAdvised("adopt-contract");
+    await run("adopt-contract", id);
+    await run("propose-promotion", id);
+    await approveAsAdvised("modify-integration");
+    for (const s of ["apply-promotion", "verify-promotion", "prepare-review"]) await run(s, id);
+    await approveAsAdvised("commit");
+    await run("commit", id);
+    const shown = (await run("show", id)).out;
+    expect(shown).toMatch(/stage ready-for-review/);
+    expect(shown).toMatch(/contract adoption: adopted/);
+    expect(shown).toMatch(/integration change: ready-for-review/);
+    expect(shown).toMatch(/committed locally: [0-9a-f]{40}/);
+    await approveAsAdvised("pull-request");
+    const submitted = await cli(["project", "submit-review", id], env);
+    expect(submitted.code).toBe(4);
+    expect(submitted.err).toMatch(/UNSUPPORTED/);
+    const cliView = JSON.parse((await run("show", id, "--json")).out) as ProjectView;
+    const ws = await openWorkspace({ home, extractionsRoot: ex.root });
+    const server = createWorkspaceServer({ workspace: ws, principal: OPERATOR, port: 0 });
+    const origin = await server.listen();
+    try {
+      expect((await (await fetch(`${origin}/api/projects/${id}`)).json()) as ProjectView).toEqual(cliView);
+      expect(cliView.integrationChange!.patch!.diff).toMatch(/^diff --git a\/bridge\/appworks\/notes-get\/adapter.mjs/m);
+    } finally {
+      await server.close();
+      await ws.close();
+    }
+  });
+
   it("exits 2 for invalid arguments, 3 when unauthorized, 4 when refused, and 1 when a step ran and failed", async () => {
     const { mirror } = notesRepository();
     const home = tempDir("ws-cli-");

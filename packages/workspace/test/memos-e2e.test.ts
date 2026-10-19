@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
-import { environmentCredentials, githubProvider, gitProvider, localAuthority, projectView, treeHash, Workspace, type Principal } from "../src/index.js";
+import { buildPromotion, environmentCredentials, githubProvider, gitProvider, listExtractions, localAuthority, main, projectView, treeHash, Workspace, type ContractAdoption, type Principal, type Promotion, type PromotionRecord } from "../src/index.js";
 
 const SOURCE = process.env.APPWORKS_MEMOS_REPO ? resolve(process.env.APPWORKS_MEMOS_REPO) : undefined;
 const ENABLED = process.env.APPWORKS_MEMOS_E2E === "1" && SOURCE !== undefined;
@@ -29,7 +29,7 @@ const EXTRACTIONS = join(APPWORKS, "extractions");
 const OPERATOR: Principal = { id: "local:memos-e2e", kind: "user" };
 
 describe.skipIf(!ENABLED)("Memos e0ce856, end to end through the workspace", () => {
-  it("acquires, inspects, discovers, assesses, reconciles, extracts ListMemoReactions, verifies it and records all of it", async () => {
+  it("acquires, inspects, discovers, assesses, reconciles, extracts and verifies ListMemoReactions, adopts its contract, applies and verifies the promoted change, and records all of it", async () => {
     const source = SOURCE!;
     const sourceBefore = treeHash(source);
     const committed = { 1: readFileSync(join(EXTRACTIONS, "memos-reactions/revisions/1/extraction.json"), "utf8"), 2: readFileSync(join(EXTRACTIONS, "memos-reactions/revisions/2/extraction.json"), "utf8") };
@@ -125,15 +125,78 @@ describe.skipIf(!ENABLED)("Memos e0ce856, end to end through the workspace", () 
       expect(view.extraction!.questions.map((q) => q.id)).toEqual(expect.arrayContaining(["q-merge-bridge", "q-adopt-contract"]));
       p = await run("ready");
       expect(p.stage).toBe("ready-for-promotion");
+
+      // ---- promotion: contract adoption ----
+      const pinnedDigest = p.revision!.treeDigest;
+      p = await run("propose-contract");
+      const adoption = (await ws.artifact<ContractAdoption>(OPERATOR, p.current.adoption))!.body;
+      expect(adoption.blocking).toEqual([]);
+      expect(adoption.validation).toEqual({ contract: [], fulfillment: [], extraction: [], verification: [] });
+      expect(adoption.contract).toMatchObject({ application: "org.appworks.contracts.memos", capability: "memos.reactions.list", version: 1, capabilityDigest: "sha256:8d67db5ca4f580fafd2fb32da567238bc64c41d55b9c13b36d5aab038cf82026", status: "proposed" });
+      expect(adoption.existingDeclarations).toEqual([]); // memos.get and memos.search are not this capability, by evidence
+      expect(adoption.differences.filter((d) => d.kind === "schema").every((d) => d.support === "verified")).toBe(true);
+      expect(adoption.differences.find((d) => d.id === "authority:requirement")).toMatchObject({ support: "verified", impact: "security", blocking: false });
+      expect(adoption.questions.map((q) => [q.id, q.disposition])).toEqual([["q-adopt-contract", "resolved"], ["q-anonymous", "accepted"], ["q-merge-bridge", "resolved"]]);
+      await expect(ws.adoptContract(OPERATOR, id)).rejects.toMatchObject({ code: "APPROVAL_REQUIRED" });
+      const adopt = await ws.approvalSubject(OPERATOR, id, "adopt-contract");
+      expect(adopt.subject).toBe(adoption.digest);
+      await ws.approve(OPERATOR, id, { action: "adopt-contract", subject: adopt.subject });
+      p = await run("adopt-contract");
+      // ---- promotion: the artifact ----
+      p = await run("propose-promotion");
+      const promotion = (await ws.artifact<Promotion>(OPERATOR, p.current.promotionArtifact))!.body;
+      const entry = listExtractions(EXTRACTIONS).find((e) => e.name === "memos-reactions")!;
+      const rebuilt = buildPromotion({ project: id, checkout: ws.store.resolve(p.revision!.checkout), repository: { url: p.repository.url, owner: p.repository.owner, name: p.repository.name }, revision: PINNED, entry, extraction: extraction!.body as never, adoptionDigest: adoption.digest });
+      expect(rebuilt.digest).toBe(promotion.digest); // deterministic
+      expect(promotion.target.files.map((f) => f.path)).toEqual(["appport-bridge/appworks/memos-reactions/README.md", "appport-bridge/appworks/memos-reactions/contract.json", "appport-bridge/appworks/memos-reactions/runtime/adapter.mjs", "appport-bridge/appworks/memos-reactions/runtime/declaration.mjs", "appport-bridge/appworks/memos-reactions/runtime/fulfillment.json", "appport-bridge/appworks/memos-reactions/runtime/host.mjs"]);
+      expect(promotion.extraction.digest).toBe(REVISION_2);
+      expect(promotion.requirements.packages).toEqual([
+        { name: "@appport/protocol", required: "1.2.0", target: "1.1.0", met: false },
+        { name: "@appport/sdk", required: "1.2.2", target: "1.2.2", met: true }
+      ]);
+      expect(p.condition.reasons.map((r) => r.code)).toContain("REQUIREMENT_UNMET");
+      // ---- promotion: apply to an isolated worktree, under its own approval ----
+      await expect(ws.applyPromotion(OPERATOR, id)).rejects.toMatchObject({ code: "APPROVAL_REQUIRED" });
+      const modify = await ws.approvalSubject(OPERATOR, id, "modify-integration");
+      expect(modify.subject).toBe(promotion.digest);
+      await ws.approve(OPERATOR, id, { action: "modify-integration", subject: modify.subject });
+      p = await run("apply-promotion");
+      const record = (await ws.records<PromotionRecord>(OPERATOR, "Promotion", id)).find((r) => r.digest === promotion.digest)!;
+      const worktree = ws.store.resolve(record.worktree);
+      const status = execFileSync("git", ["-C", worktree, "status", "--porcelain", "--untracked-files=all"], { encoding: "utf8" }).trim().split("\n").map((l) => l.slice(3)).sort();
+      expect(status).toEqual(promotion.target.files.map((f) => f.path).sort()); // nothing outside the approved set
+      for (const f of promotion.target.files) expect(readFileSync(join(worktree, f.path)).equals(readFileSync(join(entry.directory, f.source)))).toBe(true);
+      // ---- promotion: the extraction's own suite and mutants against the promoted copy, on real Memos ----
+      p = await run("verify-promotion");
+      const verifiedPromotion = await projectView(ws, OPERATOR, id);
+      expect(verifiedPromotion.integrationChange!.state).toBe("verified");
+      expect(verifiedPromotion.integrationChange!.verification).toMatchObject({ status: "verified", reasons: [], behaviors: { required: 21, passed: 21, againstReal: 21 }, mutations: { caught: 6, total: 6 } });
+      p = await run("prepare-review");
+      expect(p.stage).toBe("ready-for-review");
+      // ---- review: a local commit under its own approval; push and pull request refused, nothing simulated ----
+      const commit = await ws.approvalSubject(OPERATOR, id, "commit");
+      await ws.approve(OPERATOR, id, { action: "commit", subject: commit.subject });
+      await (await ws.commitPromotion(OPERATOR, id)).done;
+      await expect(ws.submitReview(OPERATOR, id)).rejects.toMatchObject({ code: "APPROVAL_REQUIRED" });
+      const reviewed = await projectView(ws, OPERATOR, id);
+      expect(reviewed.integrationChange!.commit).toMatch(/^[0-9a-f]{40}$/);
+      expect(execFileSync("git", ["-C", worktree, "show", "--stat", "--format=%P", "HEAD"], { encoding: "utf8" })).toMatch(new RegExp(`^${PINNED}`));
+      // The CLI shows the same state from the same records.
+      const lines: string[] = [];
+      expect(await main(["project", "show", id], { out: (t) => void lines.push(t), err: () => {} }, { home, extractions: EXTRACTIONS, principal: OPERATOR, env: {} })).toBe(0);
+      expect(lines.join("\n")).toMatch(/integration change: ready-for-review/);
+      expect(lines.join("\n")).toMatch(/requirement @appport\/protocol: verified with 1.2.0, target pins 1.1.0 \(NOT MET by this patch\)/);
+      expect(treeHash(ws.store.resolve(p.revision!.checkout))).toBe(pinnedDigest); // the pinned checkout never changed
+      p = await ws.project(OPERATOR, id);
       // 11. persisted, and inspectable through the domain API the web workspace and the CLI use
       const reopened = await Workspace.open({ home, authority: localAuthority({ [OPERATOR.id]: ["project.read"] }), credentials: environmentCredentials({}), providers: {}, extractionsRoot: EXTRACTIONS });
       try {
         const persisted = await projectView(reopened, OPERATOR, id);
-        expect(persisted.project.stage).toBe("ready-for-promotion");
+        expect(persisted.project.stage).toBe("ready-for-review");
         expect(persisted.extraction!.digest).toBe(REVISION_2);
         expect(persisted.promotion).toMatchObject({ status: "ready", deployed: false });
-        expect(persisted.approvals.map((a) => [a.action, a.status])).toEqual([["generate-files", "consumed"]]);
-        expect(persisted.history.map((h) => h.to).at(-1)).toBe("ready-for-promotion");
+        expect(persisted.approvals.map((a) => [a.action, a.status]).sort()).toEqual([["adopt-contract", "consumed"], ["commit", "consumed"], ["generate-files", "consumed"], ["modify-integration", "consumed"]]);
+        expect(persisted.history.map((h) => h.to).at(-1)).toBe("ready-for-review");
       } finally {
         await reopened.close();
       }

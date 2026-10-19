@@ -51,7 +51,7 @@ export function advanceMain(work: string, mirror: string): string {
  * An extractions root holding one reviewed extraction of the notes service's GetNote (the extraction tests' plan),
  * whose runner is the stub (`fixtures/stub-runner.mjs`), set to `mode`.
  */
-export function extractionsRoot(sourceRoot: string, options: { mode?: string; marker?: string; declaration?: (contract: unknown) => unknown } = {}): { root: string; dir: string; setMode(mode: string): void } {
+export function extractionsRoot(sourceRoot: string, options: { mode?: string; marker?: string; declaration?: (contract: unknown) => unknown; promotion?: Record<string, unknown>; promotionMode?: string } = {}): { root: string; dir: string; setMode(mode: string): void; setPromotionMode(mode: string): void } {
   const assessment = assessRepository(sourceRoot);
   const planDir = planDirectory(assessment, () => {}, options.declaration);
   const root = tempDir("ws-extractions-");
@@ -62,7 +62,35 @@ export function extractionsRoot(sourceRoot: string, options: { mode?: string; ma
   writeFileSync(join(dir, "scripts", "extract.mjs"), `import(${JSON.stringify(runner)}).then((m) => m.run(import.meta.url));\n`);
   const setMode = (mode: string) => writeFileSync(join(dir, "mode.json"), JSON.stringify({ mode, ...(options.marker ? { marker: options.marker } : {}) }));
   setMode(options.mode ?? "pass");
-  return { root, dir, setMode };
+  // The reviewed promotion: the verified adapter, declaration and contract under bridge/appworks/notes-get, verified by
+  // the stub promotion runner (a test double).
+  mkdirSync(join(dir, "promotion"), { recursive: true });
+  const promotionRunner = pathToFileURL(join(import.meta.dirname, "fixtures", "stub-promotion-runner.mjs")).href;
+  writeFileSync(join(dir, "promotion", "verify.mjs"), `import(${JSON.stringify(promotionRunner)}).then((m) => m.run(import.meta.url));\n`);
+  writeFileSync(join(dir, "promotion", "README.md"), "# note.get@1\n\nAdded by AppWorks.\n");
+  const promotionPlan = {
+    format: "appworks.promotion-plan/1",
+    extraction: "note.get",
+    target: {
+      directory: "bridge/appworks/notes-get",
+      files: [
+        { source: "contract.json", path: "contract.json", role: "contract" },
+        { source: "adapter.mjs", path: "adapter.mjs", role: "adapter" },
+        { source: "fulfillment.json", path: "fulfillment.json", role: "declaration" },
+        { source: "promotion/README.md", path: "README.md", role: "documentation" }
+      ],
+      excluded: []
+    },
+    verification: { runner: "promotion/verify.mjs", host: ".", mutations: true },
+    run: "node bridge/appworks/notes-get/adapter.mjs",
+    adoption: { questions: { "q-x": { impact: "process", disposition: "resolved", reason: "fixture" } } },
+    limitations: [{ code: "fixture", description: "synthetic" }],
+    ...(options.promotion ?? {})
+  };
+  writeFileSync(join(dir, "promotion", "promotion-plan.json"), JSON.stringify(promotionPlan, null, 2));
+  const setPromotionMode = (mode: string) => writeFileSync(join(dir, "promotion", "mode.json"), JSON.stringify({ mode }));
+  setPromotionMode(options.promotionMode ?? "pass");
+  return { root, dir, setMode, setPromotionMode };
 }
 
 export const POLICY = {
@@ -81,7 +109,8 @@ export async function openWorkspace(options: Partial<WorkspaceOptions> & { home?
     ...(options.extractionsRoot ? { extractionsRoot: options.extractionsRoot } : {}),
     ...(options.worker ? { worker: options.worker } : {}),
     ...(options.fetch ? { fetch: options.fetch } : {}),
-    ...(options.runnerTimeoutMs ? { runnerTimeoutMs: options.runnerTimeoutMs } : {})
+    ...(options.runnerTimeoutMs ? { runnerTimeoutMs: options.runnerTimeoutMs } : {}),
+    ...(options.faultPoint ? { faultPoint: options.faultPoint } : {})
   });
 }
 
@@ -94,11 +123,12 @@ export async function step(ws: Workspace, principal: Principal, id: string, name
 /** Creates a project for the mirror and runs it to `until` (inclusive), returning its id. */
 export async function advanceTo(ws: Workspace, mirror: string, until: string, input: { ref?: string; endpoint?: string; candidate?: string } = {}): Promise<string> {
   const p = await ws.createProject(OPERATOR, { provider: "git", owner: "example", name: "notes", url: "https://github.com/example/notes", fetchFrom: mirror, ref: input.ref ?? "main" });
-  const order = ["acquire", "pin", "inspect", "discover", "assess", "reconcile", "select", "plan", "request-approval", "approve", "execute", "verify", "ready"];
+  const order = ["acquire", "pin", "inspect", "discover", "assess", "reconcile", "select", "plan", "request-approval", "approve", "execute", "verify", "ready", "propose-contract", "approve-adoption", "adopt-contract", "propose-promotion", "approve-promotion", "apply-promotion", "verify-promotion", "prepare-review"];
+  const approvals: Record<string, string> = { approve: "generate-files", "approve-adoption": "adopt-contract", "approve-promotion": "modify-integration" };
   for (const name of order) {
-    if (name === "approve") {
-      const { subject } = await ws.approvalSubject(OPERATOR, p.id, "generate-files");
-      await ws.approve(OPERATOR, p.id, { action: "generate-files", subject });
+    if (approvals[name]) {
+      const { subject } = await ws.approvalSubject(OPERATOR, p.id, approvals[name]!);
+      await ws.approve(OPERATOR, p.id, { action: approvals[name]!, subject });
     } else await step(ws, OPERATOR, p.id, name, name === "discover" && input.endpoint ? { endpoint: input.endpoint } : name === "select" ? { candidate: input.candidate ?? CANDIDATE } : {});
     if (name === until) break;
   }

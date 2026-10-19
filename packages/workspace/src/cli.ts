@@ -111,6 +111,23 @@ function showText(v: ProjectView): string[] {
   if (v.extraction) lines.push(`  extraction: ${v.extraction.identity} ${v.extraction.digest}; ${v.extraction.summary.passed} passed, ${v.extraction.summary.failed} failed, ${v.extraction.summary["not-run"]} not run`);
   if (v.verification) lines.push(`  verification: ${v.verification.status}${v.verification.fresh ? "" : ` but stale (${v.verification.staleReasons.join("; ")})`}; ${v.verification.behaviors.passed} of ${v.verification.behaviors.required} behaviors (${v.verification.behaviors.againstReal} against the real application); checkout ${v.verification.checkoutUnchanged ? "unchanged" : "CHANGED"}`);
   if (v.promotion) lines.push(`  promotion: ${v.promotion.status}; deployed: ${v.promotion.deployed ? "yes" : "no"}`);
+  if (v.adoption) {
+    const a = v.adoption;
+    lines.push(`  contract adoption: ${a.adopted ? "adopted" : a.blocking.length ? `BLOCKED (${a.blocking.length})` : "proposed"} ${a.contract.application} ${a.contract.capability}@${a.contract.version} ${a.digest}`);
+    for (const d of a.differences) lines.push(`    ${d.blocking ? "BLOCKING " : ""}${d.kind} ${d.subject}: ${d.support}, ${d.impact}${d.reason ? "" : ` (${d.description})`}`);
+    for (const q of a.questions) lines.push(`    question ${q.id}: ${q.disposition} (${q.impact})`);
+    for (const b of a.blocking) lines.push(`    ${b.code} ${b.subject}: ${b.message}`);
+  }
+  if (v.integrationChange) {
+    const c = v.integrationChange;
+    lines.push(`  integration change: ${c.state}; promotion ${c.promotion.digest}; adds ${c.promotion.target.files.length} files under ${c.promotion.target.directory} on ${c.promotion.target.base.slice(0, 12)}`);
+    for (const f of c.promotion.target.files) lines.push(`    + ${f.path} (${f.role}, ${f.sha256.slice(0, 19)}…)`);
+    for (const r of c.promotion.requirements.packages) lines.push(`    requirement ${r.name}: verified with ${r.required}, target pins ${r.target ?? "nothing"}${r.met ? "" : " (NOT MET by this patch)"}`);
+    if (c.patch) lines.push(`    patch ${c.patch.digest} (worktree ${c.worktree}); show it with --json or in the web workspace`);
+    if (c.verification) lines.push(`    verification: ${c.verification.status}; ${c.verification.behaviors.passed} of ${c.verification.behaviors.required} behaviors (${c.verification.behaviors.againstReal} against the real application); mutants ${c.verification.mutations ? `${c.verification.mutations.caught} of ${c.verification.mutations.total}` : "not run"}${c.verification.reasons.length ? `; ${c.verification.reasons.map((r) => r.code).join(", ")}` : ""}`);
+    if (c.commit) lines.push(`    committed locally: ${c.commit} on ${c.branch} (not pushed)`);
+    for (const r of c.reasons) lines.push(`    ${r.code}: ${r.message}`);
+  }
   if (p.activeRun) lines.push(`  run: ${p.activeRun.id} ${p.activeRun.expired ? "interrupted (lease expired)" : "running"}`);
   lines.push(`  next: ${v.next.summary}`);
   for (const a of v.next.actions) lines.push(`    appworks project ${a.action} ${p.id}${(a.inputs ?? []).map((i) => ` ${i.required ? "" : "["}--${i.name} ${i.value ?? `<${i.name}>`}${i.required ? "" : "]"}`).join("")}  # ${a.reason}`);

@@ -39,6 +39,22 @@ export function subjectOf(repo) {
 }
 const sortKeys = (o) => Object.fromEntries(Object.entries(o).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
 
+/**
+ * Whether `hostDir` holds exactly the verified host: the same bytes as runtime/host.mjs, adapter.mjs, declaration.mjs
+ * and fulfillment.json, and its parent the same contract.json. Only then do its results describe this extraction's
+ * subject (the subject is computed from these files here); a modified copy, such as a mutant, is never recorded.
+ */
+export function isVerifiedHostCopy(hostDir) {
+  const same = (a, b) => {
+    try {
+      return readFileSync(a).equals(readFileSync(b));
+    } catch {
+      return false;
+    }
+  };
+  return ["host.mjs", "adapter.mjs", "declaration.mjs", "fulfillment.json"].every((f) => same(join(hostDir, f), join(HERE, "runtime", f))) && same(join(hostDir, "..", "contract.json"), join(HERE, "contract.json"));
+}
+
 /** A content hash of a tree: every path, mode, mtime, link target and file content, .git included. */
 export function treeHash(root) {
   const hash = createHash("sha256");

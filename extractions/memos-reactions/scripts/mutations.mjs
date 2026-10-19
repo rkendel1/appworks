@@ -5,6 +5,9 @@
 // the suite does not catch fails this script. Mutant runs are never recorded as verification results.
 //
 //   MEMOS_REPO=<checkout at e0ce856> node scripts/mutations.mjs
+//
+// APPWORKS_MUTATION_SOURCE names another directory holding runtime/ and contract.json to mutate copies of (the host
+// promoted into the application, promotion/verify.mjs); by default this package's own.
 import { spawnSync, execFileSync } from "node:child_process";
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -18,6 +21,8 @@ if (!repo) {
   console.error("MEMOS_REPO is not set");
   process.exit(2);
 }
+
+const source = process.env.APPWORKS_MUTATION_SOURCE ? resolve(process.env.APPWORKS_MUTATION_SOURCE) : here;
 
 const replace = (from, to) => (text) => {
   if (!text.includes(from)) throw new Error(`mutation does not apply: ${from}`);
@@ -78,8 +83,8 @@ let survived = 0;
 for (const mutant of MUTANTS) {
   const dir = join(root, mutant.name);
   mkdirSync(dir, { recursive: true });
-  cpSync(join(here, "runtime"), join(dir, "runtime"), { recursive: true });
-  cpSync(join(here, "contract.json"), join(dir, "contract.json"));
+  cpSync(join(source, "runtime"), join(dir, "runtime"), { recursive: true });
+  cpSync(join(source, "contract.json"), join(dir, "contract.json"));
   const target = join(dir, "runtime", mutant.file);
   writeFileSync(target, mutant.patch(readFileSync(target, "utf8")));
   const run = spawnSync(process.execPath, ["--no-warnings", "--import", join(here, "runtime", "register.mjs"), "--test", "--test-concurrency=1", join(here, "test", "behavior.test.mjs")], {

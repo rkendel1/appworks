@@ -38,7 +38,8 @@ The stages, in order (`workflow transformation` in `feltdb.flow`; each step's `t
 
 `project-selected` → `repository-acquired` → `revision-pinned` → `integration-inspected` → `capabilities-discovered` →
 `assessment-completed` → `inventory-reconciled` → `candidate-selected` → `extraction-planned` → `awaiting-approval` →
-`extraction-executed` → `verification-completed` → `ready-for-promotion`
+`extraction-executed` → `verification-completed` → `ready-for-promotion` → `contract-proposed` → `contract-adopted` →
+`promotion-proposed` → `promotion-applied` → `promotion-verified` → `ready-for-review` → `submitted-for-review`
 
 | Step | From | Precondition (validated evidence) | Records |
 |---|---|---|---|
@@ -54,6 +55,13 @@ The stages, in order (`workflow transformation` in `feltdb.flow`; each step's `t
 | `execute` | `awaiting-approval` | a granted, unconsumed approval of the **current** subject | runner log; the extraction artifact; the approval consumed |
 | `verify` | `extraction-executed` (re-run later) | — | verification record (§6); the inventory recomputed with it |
 | `ready` | `verification-completed` | verified **and** still fresh | promotion status `ready`, `deployed: false` |
+| `propose-contract` | `ready-for-promotion` (re-run at `contract-proposed`) | the verification is verified and fresh | contract-adoption proposal (§11) |
+| `adopt-contract` | `contract-proposed` | nothing blocks; re-deriving the proposal gives the same digest; an `adopt-contract` approval of that digest | adoption decision; the approval consumed |
+| `propose-promotion` | `contract-adopted` (re-run at `promotion-proposed`) | the current proposal is the adopted one; the reviewed promotion plan matches the verified extraction | promotion artifact (§12) and its `Promotion` record (`proposed`) |
+| `apply-promotion` | `promotion-proposed` | the artifact valid against everything it names; a `modify-integration` approval of its digest; the pinned checkout unchanged; the destination clean | the files written to an isolated worktree, the patch and its digest; `applied` |
+| `verify-promotion` | `promotion-applied` (re-run later) | the worktree holds exactly the patch, applied under its approval | promotion verification; `verified` or `verification-failed` |
+| `prepare-review` | `promotion-verified` | verified, and every input still what was verified | `ready-for-review` |
+| `submit-review` | `ready-for-review` | a committed promotion and a `pull-request` approval of exactly that commit | refused: `UNSUPPORTED` (§10) |
 
 A step re-run from a later stage returns the project to the step's own stage and clears the evidence later stages derived.
 
@@ -116,16 +124,20 @@ Authority and approval are separate, and both are enforced at the action boundar
 * **Authority** is a port (`Authority.decide(principal, action, resource)`); the default is a local policy for a single operator on
   loopback. Actions: `project.read`, `project.create`, `project.advance`, `project.cancel`, `approval.grant:<action>`, `action:<action>`,
   `github:<capability>`. AppWorks defines no authorization semantics beyond naming them; an AuthBoundry deployment can stand behind the port.
-* **Approval** is per action class, `generate-files`, `modify-integration`, `commit`, `push`, `pull-request`, `promote` (the flow's
+* **Approval** is per action class, `generate-files`, `adopt-contract`, `modify-integration`, `commit`, `push`, `pull-request`, `promote` (the flow's
   `approvals` policy), and per **subject**: a digest of exactly the inputs (for `generate-files`: revision, assessment, extraction, its
   directory digest and the validated plan). A changed input is a different subject, so an earlier approval does not cover it. An approval is
   consumed by the run that performs the action, once.
 * A valid fulfillment claim is not a grant, and a verified extraction is not an approval for production: `ready-for-promotion` deploys
   nothing, and `promote` needs its own approval.
-* `commit`, `push`, `modify-integration` and `promote` are enforced (authority, approval) and then refused as `UNSUPPORTED`: the extraction
-  writes nothing to the target repository, `@appport/github` has no commit or push contract, and there is no deployment contract.
-  `pull-request` opens a pull request through `@appport/github` with the write capability and write credential after an approval of that
-  repository, revision, head and base.
+* Subjects: `generate-files` the revision, assessment, extraction directory and validated plan; `adopt-contract` the adoption
+  proposal's digest; `modify-integration` the promotion artifact's digest; `commit` the promotion and patch digests; `push` and
+  `pull-request` (for a promotion) the promotion, patch, commit, branch and base. Subjects are AppPort `digestOf` (RFC 8785) digests.
+* `modify-integration` (applying a promotion to an isolated worktree, and running its declared verification) and `commit` (a local
+  commit in that worktree) are supported. `push`, submitting for review and `promote` are enforced (authority, approval) and then refused
+  as `UNSUPPORTED`: `@appport/github` 1.0.2 has no push, commit or compare contract, the workspace does not push with git behind it, and
+  there is no deployment contract. The generic `pull-request` action opens a pull request through `@appport/github` (write capability,
+  write credential) for an existing head branch, after an approval of that repository, revision, head and base.
 
 ## 8. Agents
 
@@ -142,7 +154,7 @@ library, the boundary checks above) decide every transition.
 * **CLI:** `appworks project …` and `appworks serve`; `appworks assess|verify|extract|verify-extraction` are `@appport/extraction`'s,
   unchanged. `appworks project show <id> --json` prints the same object `GET /api/projects/<id>` returns.
 
-## 10. Jobs
+## 10. Jobs, and GitHub
 
 The workspace does not use `@appport/services`' `JobService` (0.4.12). Its guarantees do not fit: a job left `running` by a dead worker is
 never reclaimed (`FeltDbJobStore.claim` sets no `leaseOwner`, and `executeJob` refuses a running job whose `leaseOwner` differs, whatever
@@ -150,3 +162,80 @@ its lease), there is no lease renewal, handlers run before completion is recorde
 workspace's FeltDB handle, and its FeltDB store is not exported. The workspace's runs are the smallest safe replacement: a run record per
 attempt, claimed in the same transaction that makes it the project's active run, a renewed lease, takeover after expiry, and completion
 applied atomically with the project's stage. A run's status never decides a stage: the project record and its evidence do.
+
+## 11. Contract adoption (`appworks.contract-adoption/1`)
+
+A probable or confirmed match is not an adopted contract. `propose-contract` makes an explicit, versioned proposal to adopt the verified
+extraction's canonical contract into the target's integration, from: the extraction artifact (its contract, the assessment's
+source-inferred proposal, the plan's mapping and decisions, its authorization restrictions, its verification records and their subject,
+its questions and limitations), the assessed candidate (source evidence), the current contract and fulfillment declaration files, the
+discovery record, the inventory, and the reviewed question dispositions of the promotion plan.
+
+* **Differences.** Every `compareSchemas` difference from the source-inferred proposal; every mapping decision; the authority the
+  contract requires and each restriction; the effect; and every existing AppPort declaration that may be the same capability (reconciled
+  with the candidate, claiming the same canonical capability, or merely sharing its name). Each states its impact (`security`,
+  `correctness`, `contract`, `compatibility`, `process`) and its support: `verified` (behaviors covering it passed, for exactly this
+  contract), `source-evidence`, `explained` (a reviewed reason only) or `unknown`.
+* **Validation**, with AppPort's and the extraction library's own checks: the contract is a canonical contract (`isCanonicalContract`,
+  `contractProblems`); its `contractDigest` and `capabilityDigest` are the ones the extraction verified (a changed contract invalidates
+  the verification); the declaration as it is now passes `fulfillmentProblems` and is the one verified; the extraction artifact verifies;
+  every required behavior passed.
+* **Blocking.** Any validation problem; an `unknown` difference with security, correctness or contract impact; an incompatible existing
+  declaration (any `breaking` `compareSchemas` change, or another effect), or one whose schemas were not recorded; an open question with
+  security, correctness or contract impact. A blocked proposal stays visible, keeps the project `partial`, and cannot be approved.
+* **Adoption** needs an `adopt-contract` approval of the proposal's digest. `adopt-contract` re-derives the proposal from the current
+  inputs and refuses (`ADOPTION_STALE`) if the digest differs. Adoption means the contract is published by the target's own integration
+  (a promoted file); AppWorks registers it nowhere. It grants no authority and is not an equivalence claim (`scope`).
+
+## 12. Promotion (`appworks.promotion/1`)
+
+A promotion describes one integration change: a reviewed **promotion plan** (`<extraction>/promotion/promotion-plan.json`,
+`appworks.promotion-plan/1`) names which of the extraction's files are added to the target, where, and which are not (with reasons), the
+verification runner, the target lockfile to check runtime requirements against, and the dispositions of the extraction's questions. The
+workspace generates no code.
+
+**Content.** Source repository and pinned revision; project; provider capability and adopted contract (both digests); assessment digest
+and candidate; extraction (name, digest, format, identity, adapter digest); adoption digest; fulfillment declaration digest; runtime;
+runtime requirements against the target's lockfile at the base (`met` per package); the promotion plan's digest; the target (base,
+directory, every file with its source, role, mode, sha256 and size, the excluded files, `add-only`); the verification the promoted copy
+must pass (the required behaviors, **the extraction's own verification subject**, the target each behavior passed against, the runner and
+its sha256, the host directory, whether mutants run); the approvals each later action needs, and which are supported; what executes;
+limitations and questions; `scope` (no authority, no existing file modified, no commit, push or deployment). No timestamp or run
+identifier: the digest (`digestOf` over everything else) is the same for the same inputs.
+
+**Integrity rules.** Every `adapter` and `declaration` file must be byte-for-byte a file the extraction verified (its digest equals the
+extraction's adapter file digest); the `contract` file must have the verified contract and capability digests; every verified file is
+promoted or excluded with a reason; a contract and a declaration must be promoted. Before use the artifact is checked against its own
+digest and against the current state, refusing with `PROMOTION_DIGEST_MISMATCH`, `PROMOTION_REVISION_STALE`,
+`PROMOTION_EXTRACTION_MISMATCH`, `PROMOTION_ADOPTION_MISMATCH`, `PROMOTION_SOURCE_CHANGED` or `PROMOTION_PATH_INVALID`. The extraction
+artifact is never modified.
+
+**Lifecycle** (the `Promotion` record, never the artifact): `proposed` → `approved` (a `modify-integration` approval of its digest) →
+`applied` (the isolated worktree holds exactly its files; patch recorded) → `verified` or `verification-failed` → `ready-for-review`;
+`submitted-for-review` is declared and not reachable (§7). A local commit is recorded on the record without changing its state.
+
+**Applying.** The worktree is a fresh repository at the base revision, fetched from the pinned checkout (which is only read), one per
+promotion. Before writing: the artifact is valid; the approval is of its digest; the pinned checkout is still the pinned revision; the
+worktree is at the base and holds nothing but approved files with approved bytes (`DESTINATION_DIRTY` otherwise); the authority is
+checked again. Only the artifact's files are written, each only if absent. After writing, the complete diff is inspected: any path outside
+the approved set (`PATCH_OUTSIDE_APPROVED_SET`), any operation but an addition, any missing or different file refuses, and the patch as
+found and the reasons are kept. The patch digest is `digestOf` of the base and each file's path, mode and sha256; the full `git diff` is
+stored for review.
+
+**Verifying.** The promotion's runner (`--repo <worktree> --host <dir> --output <file> [--mutations]`) runs the extraction's own
+behavioral suite against the promoted copy, and the mutation check against copies of it. The suite records results only if the host
+directory is a byte-for-byte copy of the verified host, adapter, declaration and contract. The promotion is `verified` only if the
+results' subject equals the extraction's, digest for digest; every required behavior passed against the same target as before; every
+mutant was caught; and the worktree is exactly the patch before and after. Otherwise `verification-failed`, with reasons, and the patch
+kept.
+
+**Recovery.** Runs, leases and resume are the workflow's (§3). A resumed `apply-promotion` inspects the worktree first and writes only
+what is absent; a resumed `commit` finds a commit that is exactly the patch on the base and adopts it, and refuses anything else.
+
+**GitHub operations** (`@appport/github` 1.0.2, unchanged since the previous milestone; its repository's HEAD is that release):
+supported are ref, repository, branch and commit reads (acquisition) and opening a pull request for an existing head branch. Not
+supported, and refused rather than simulated: fetching content (the workspace fetches the resolved commit with git), comparing
+revisions, fork parentage, creating commits and pushing. A safe remote promotion needs, at minimum, `repositories.compare`, the
+repository's `parent`, and a commit-and-push operation (or the git data API) under its write capability; those need a release of
+`@appport/github`, which should also move it to the current AppPort stack (`@appport/protocol` 1.2.0) and FeltDB, removing the second
+stack it brings today.

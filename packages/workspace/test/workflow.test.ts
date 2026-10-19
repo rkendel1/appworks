@@ -93,13 +93,13 @@ describe("approval is enforced at the action boundary", () => {
     }
   });
 
-  it("enforces commit, push, promote and integration changes: no approval is refused, an approval is still unsupported", async () => {
+  it("enforces push and promote: no approval is refused, an approval is still unsupported; commit and integration changes need a promotion", async () => {
     const { mirror, work } = notesRepository();
     const ex = extractionsRoot(work);
     const ws = await openWorkspace({ extractionsRoot: ex.root });
     try {
       const id = await advanceTo(ws, mirror, "ready");
-      for (const action of ["commit", "push", "promote", "modify-integration"]) {
+      for (const action of ["push", "promote"]) {
         await refusal(ws.dispatch(OPERATOR, id, action, {}), "APPROVAL_REQUIRED");
         const { subject } = await ws.approvalSubject(OPERATOR, id, action);
         await ws.approve(OPERATOR, id, { action, subject });
@@ -107,6 +107,10 @@ describe("approval is enforced at the action boundary", () => {
         const e = await refusal(again.done, "UNSUPPORTED");
         expect(e.message).toMatch(/approved but not supported/);
       }
+      // Commit and integration changes exist only for a promotion (test/promotion.test.ts): none here.
+      await refusal(ws.dispatch(OPERATOR, id, "commit", {}), "INVALID_TRANSITION");
+      await refusal(ws.dispatch(OPERATOR, id, "apply-promotion", {}), "INVALID_TRANSITION");
+      await refusal(ws.dispatch(OPERATOR, id, "modify-integration", {}), "INVALID_INPUT");
       const p = await ws.project(OPERATOR, id);
       // a refused action does not move or fail the workflow
       expect(p.stage).toBe("ready-for-promotion");

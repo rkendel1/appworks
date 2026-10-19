@@ -9,7 +9,10 @@ import type { ApplicationAssessment } from "@appport/assessment";
 import type { CapabilityExtraction } from "@appport/extraction";
 import type { DiscoveryRecord } from "./discovery.js";
 import type { IntegrationRecord } from "./inspect.js";
-import { MODEL, STAGES, stageIndex, type ApprovalRecord, type ArtifactRecord, type Principal, type Project, type Run, type StageEvent, type VerificationRecord } from "./model.js";
+import { MODEL, STAGES, stageIndex, type ApprovalRecord, type ArtifactRecord, type Principal, type Project, type PromotionRecord, type Run, type StageEvent, type VerificationRecord } from "./model.js";
+import { digestOf } from "@appport/protocol";
+import type { ContractAdoption } from "./adoption.js";
+import type { Promotion } from "./promotion.js";
 import type { InventoryRecord } from "./reconcile.js";
 import type { Workspace } from "./workflow.js";
 
@@ -61,6 +64,19 @@ export interface ProjectView {
   extraction?: { artifact: string; digest: string; format: string; identity: string; previous?: string; source: string; contract: string; fulfillment?: string; summary: CapabilityExtraction["verification"]["summary"]; questions: Array<{ id: string; question: string }>; log?: string };
   verification?: VerificationRecord & { fresh: boolean; staleReasons: string[] };
   promotion?: { status: string; deployed: boolean; note: string; at: string };
+  adoption?: ContractAdoption & { artifact: string; adopted: boolean; decision?: { by: string; at: string; approval: string } };
+  integrationChange?: {
+    artifact: string;
+    promotion: Promotion;
+    state: PromotionRecord["state"];
+    worktree: string;
+    approval?: string;
+    patch?: { artifact: string; digest: string; diff: string; files: number };
+    verification?: { artifact: string; status: string; reasons: Array<{ code: string; message: string }>; behaviors: { required: number; passed: number; againstReal: number }; mutations: { caught: number; total: number } | null };
+    commit?: string;
+    branch?: string;
+    reasons: Array<{ code: string; message: string }>;
+  };
   runs: Array<Pick<Run, "id" | "step" | "attempt" | "status" | "owner" | "actor" | "startedAt" | "finishedAt" | "error">>;
   history: Array<Pick<StageEvent, "sequence" | "step" | "from" | "to" | "condition" | "at" | "actor" | "note" | "reasons">>;
   next: { summary: string; actions: NextAction[]; note: string };
@@ -167,6 +183,31 @@ export async function projectView(ws: Workspace, principal: Principal, id: strin
   }
   const promotion = decisions.find((d) => d.id === p.current.promotion);
   if (promotion) view.promotion = { status: String(promotion.status), deployed: promotion.deployed === true, note: String(promotion.note ?? ""), at: String(promotion.at) };
+  const adoption = await ws.artifact<ContractAdoption>(principal, p.current.adoption);
+  if (adoption) {
+    const decision = decisions.find((d) => d.id === p.current.adoptionDecision) as (Record<string, unknown> & { adoptionDigest?: string }) | undefined;
+    const adopted = Boolean(decision && decision.adoptionDigest === adoption.body.digest);
+    view.adoption = { ...adoption.body, artifact: adoption.record.id, adopted, ...(adopted ? { decision: { by: String(decision!.by), at: String(decision!.at), approval: String(decision!.approval) } } : {}) };
+  }
+  const promotionArtifact = await ws.artifact<Promotion>(principal, p.current.promotionArtifact);
+  if (promotionArtifact) {
+    const record = (await ws.records<PromotionRecord>(principal, "Promotion", id)).find((r) => r.digest === promotionArtifact.body.digest);
+    const patch = record?.patch ? await ws.artifact<{ diff: string; files: unknown[]; patchDigest: string }>(principal, record.patch) : undefined;
+    const pv = record?.verification ? await ws.artifact<{ status: string; reasons: Array<{ code: string; message: string }>; results: { behaviors: Record<string, { status: string; against?: string }> } | null; mutations: { caught: number; total: number } | null }>(principal, record.verification) : undefined;
+    const behaviors = pv?.body.results ? Object.values(pv.body.results.behaviors) : [];
+    view.integrationChange = {
+      artifact: promotionArtifact.record.id,
+      promotion: promotionArtifact.body,
+      state: record?.state ?? "proposed",
+      worktree: record?.worktree ?? "",
+      ...(record?.approval ? { approval: record.approval } : {}),
+      ...(patch ? { patch: { artifact: patch.record.id, digest: patch.body.patchDigest, diff: patch.body.diff, files: patch.body.files.length } } : {}),
+      ...(pv ? { verification: { artifact: pv.record.id, status: pv.body.status, reasons: pv.body.reasons, behaviors: { required: promotionArtifact.body.verification.required.length, passed: behaviors.filter((b) => b.status === "passed").length, againstReal: behaviors.filter((b) => b.status === "passed" && b.against === "real-application").length }, mutations: pv.body.mutations } } : {}),
+      ...(record?.commit ? { commit: record.commit } : {}),
+      ...(record?.branch ? { branch: record.branch } : {}),
+      reasons: record?.reasons ?? []
+    };
+  }
   view.next = advise(view);
   return view;
 }
@@ -232,12 +273,56 @@ export function advise(v: ProjectView): ProjectView["next"] {
       else add("verify", "Verify again", v.verification ? `not verified: ${[...v.verification.reasons.map((r) => r.code), ...v.verification.staleReasons].join(", ")}` : "verify");
       break;
     case "ready-for-promotion":
+      add("propose-contract", "Propose contract adoption", "compare the verified contract with the source, the plan's decisions, its authority and existing declarations; nothing is adopted yet");
       add("verify", "Re-verify", "check the verification still holds");
       break;
+    case "contract-proposed": {
+      const a = v.adoption;
+      if (a && a.blocking.length) add("propose-contract", "Propose again", `${a.blocking.length} blocking items must be resolved first: ${a.blocking.map((b) => b.code).join(", ")}`);
+      else {
+        const granted = v.approvals.find((x) => x.action === "adopt-contract" && x.subject === a?.digest && x.status === "granted");
+        if (granted) add("adopt-contract", "Adopt contract", "the approval covers exactly this proposal", { approval: "adopt-contract" });
+        else add("approve", "Approve contract adoption", `adopt ${a?.contract.application} ${a?.contract.capability}@${a?.contract.version} into the target's integration as proposed`, { approval: "adopt-contract", inputs: [{ name: "action", label: "Action", required: true, value: "adopt-contract" }, { name: "subject", label: "Subject", required: true, ...(a ? { value: a.digest } : {}) }] });
+      }
+      break;
+    }
+    case "contract-adopted":
+      add("propose-promotion", "Propose promotion", "describe the integration change: which verified files are added where, and how the promoted copy is verified");
+      break;
+    case "promotion-proposed": {
+      const c = v.integrationChange;
+      if (c?.state === "approved") add("apply-promotion", "Apply to isolated worktree", "adds exactly the approved files to an isolated worktree of the pinned revision", { approval: "modify-integration" });
+      else add("approve", "Approve integration change", `add ${c?.promotion.target.files.length ?? 0} files under ${c?.promotion.target.directory ?? ""} in an isolated worktree and verify them`, { approval: "modify-integration", inputs: [{ name: "action", label: "Action", required: true, value: "modify-integration" }, { name: "subject", label: "Subject", required: true, ...(c ? { value: c.promotion.digest } : {}) }] });
+      add("propose-promotion", "Propose again", "if the promotion plan or a promoted file changed");
+      break;
+    }
+    case "promotion-applied":
+      add("verify-promotion", "Verify the promoted change", "run the extraction's behavioral suite and mutation check against the promoted copy in the worktree");
+      break;
+    case "promotion-verified":
+      if (v.integrationChange?.state === "verified") add("prepare-review", "Prepare for review", "the promoted change verified; re-check every input and mark it ready for review");
+      else add("verify-promotion", "Verify again", `not verified: ${(v.integrationChange?.verification?.reasons ?? []).map((r) => r.code).join(", ")}`);
+      break;
+    case "ready-for-review": {
+      const c = v.integrationChange;
+      if (!c?.commit) {
+        const granted = v.approvals.find((x) => x.action === "commit" && x.status === "granted");
+        if (granted) add("commit", "Commit locally", "commit the reviewed patch on a local branch of the isolated worktree; nothing is pushed", { approval: "commit" });
+        else add("approve", "Approve local commit", `commit exactly the reviewed patch ${c?.patch?.digest ?? ""} on a local branch of the isolated worktree; nothing is pushed`, { approval: "commit", inputs: [{ name: "action", label: "Action", required: true, value: "commit" }, { name: "subject", label: "Subject", required: true, ...(c?.patch ? { value: digestOf({ action: "commit", promotion: c.promotion.digest, patch: c.patch.digest }) } : {}) }] });
+      } else {
+        const subject = digestOf({ action: "pull-request", promotion: c.promotion.digest, patch: c.patch?.digest, commit: c.commit, branch: c.branch ?? null, base: p.repository.defaultBranch ?? null });
+        const granted = v.approvals.find((x) => x.action === "pull-request" && x.subject === subject && x.status === "granted");
+        if (granted) add("submit-review", "Submit for review", "needs the branch pushed to GitHub: @appport/github has no push contract, so this is refused after its approval check", { approval: "pull-request" });
+        else add("approve", "Approve submitting for review", "push the committed branch and open a pull request (not supported yet: the approval is recorded, the action is refused)", { approval: "pull-request", inputs: [{ name: "action", label: "Action", required: true, value: "pull-request" }, { name: "subject", label: "Subject", required: true, value: subject }] });
+      }
+      break;
+    }
   }
-  if (p.stage !== "ready-for-promotion") add("cancel", "Cancel project", "stop and keep the record", { inputs: [{ name: "reason", label: "Reason", required: false }] });
+  if (!["ready-for-promotion", "ready-for-review", "submitted-for-review"].includes(p.stage)) add("cancel", "Cancel project", "stop and keep the record", { inputs: [{ name: "reason", label: "Reason", required: false }] });
   const summary =
-    p.stage === "ready-for-promotion"
+    p.stage === "ready-for-review"
+      ? `The integration change is applied to an isolated worktree and verified for exactly the extraction's subject${v.integrationChange?.commit ? `, and committed locally (${v.integrationChange.commit.slice(0, 12)})` : ""}. Review the patch; nothing has been pushed or deployed.`
+      : p.stage === "ready-for-promotion"
       ? "Verified for exactly this revision, contract, adapter, declaration and runtime. Promotion needs its own approval; no deployment contract exists here."
       : `At ${p.stage}${p.condition.state === "partial" ? `, with gaps: ${p.condition.reasons.map((r) => r.code).join(", ")}` : ""}.`;
   return { summary, actions, note };
