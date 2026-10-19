@@ -22,6 +22,9 @@ export type StepName = string;
 export const APPROVAL_ACTIONS: readonly string[] = MODEL.approvalActions;
 export type ApprovalAction = string;
 
+/** The current-evidence slots: the `evidence` names of the flow's steps. */
+export type EvidenceSlot = string;
+
 /** Who acted. The workspace never stores a credential; a principal is an identity, not a secret. */
 export interface Principal {
   id: string;
@@ -83,7 +86,7 @@ export interface Project {
   /** The step that failed, when `condition.state` is `failed`: resume re-runs it. */
   failure?: { step: StepName; code: string; message: string; at: string; run: string };
   /** The current evidence: ids of records and artifacts in FeltDB. Replaced evidence stays in history. */
-  current: Partial<Record<"integration" | "discovery" | "assessment" | "inventory" | "selection" | "plan" | "approvalRequest" | "extraction" | "verification" | "promotion", string>>;
+  current: Partial<Record<EvidenceSlot, string>>;
   /** The run holding the project, if a step is in progress. */
   activeRun?: string;
   /** How many stage events exist: the next one's sequence number. */
@@ -124,7 +127,7 @@ export interface Run {
   __version?: number;
 }
 
-export type ArtifactKind = "integration" | "discovery" | "assessment" | "inventory" | "plan" | "extraction" | "verification-log";
+export type ArtifactKind = "integration" | "discovery" | "assessment" | "inventory" | "plan" | "extraction" | "verification-log" | "adoption" | "promotion" | "patch" | "promotion-verification" | "promotion-log";
 
 /** A content-addressed file under the workspace home, referenced from FeltDB by digest. */
 export interface ArtifactRecord {
@@ -143,6 +146,32 @@ export interface ArtifactRecord {
   run: string;
   partial: string[];
   summary: Record<string, unknown>;
+}
+
+/** Where one promotion is in its lifecycle. The promotion artifact it names never changes. */
+export type PromotionState = "proposed" | "approved" | "applied" | "verified" | "verification-failed" | "ready-for-review" | "submitted-for-review";
+export interface PromotionRecord {
+  id: string;
+  projectId: string;
+  artifact: string;
+  digest: string;
+  state: PromotionState;
+  /** The isolated promotion worktree, relative to the workspace home. Never the pinned checkout. */
+  worktree: string;
+  base: string;
+  createdAt: string;
+  updatedAt: string;
+  approval?: string;
+  appliedAt?: string;
+  patch?: string;
+  patchDigest?: string;
+  files?: Array<{ path: string; sha256: string; mode: string }>;
+  verification?: string;
+  verificationStatus?: "verified" | "not-verified";
+  reasons?: Reason[];
+  commit?: string;
+  branch?: string;
+  __version?: number;
 }
 
 export interface ApprovalRecord {

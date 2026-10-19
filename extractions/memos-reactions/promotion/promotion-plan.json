@@ -1,0 +1,34 @@
+{
+  "format": "appworks.promotion-plan/1",
+  "extraction": "memos.reactions.list",
+  "target": {
+    "directory": "appport-bridge/appworks/memos-reactions",
+    "files": [
+      { "source": "contract.json", "path": "contract.json", "role": "contract" },
+      { "source": "runtime/adapter.mjs", "path": "runtime/adapter.mjs", "role": "adapter" },
+      { "source": "runtime/declaration.mjs", "path": "runtime/declaration.mjs", "role": "adapter" },
+      { "source": "runtime/fulfillment.json", "path": "runtime/fulfillment.json", "role": "declaration" },
+      { "source": "runtime/host.mjs", "path": "runtime/host.mjs", "role": "adapter" },
+      { "source": "promotion/README.md", "path": "README.md", "role": "documentation" }
+    ],
+    "excluded": [
+      { "source": "runtime/register.mjs", "reason": "AppWorks only: lets the bridge's modules, loaded from a checkout, resolve @appport/* from AppWorks' pinned copies. Inside Memos the bridge resolves its own dependencies." },
+      { "source": "runtime/resolve-hooks.mjs", "reason": "AppWorks only: the resolution hook register.mjs installs." }
+    ]
+  },
+  "verification": { "runner": "promotion/verify.mjs", "host": "runtime", "mutations": true },
+  "requirements": { "lockfile": "appport-bridge/package-lock.json" },
+  "run": "MEMOS_REPO=<the Memos repository root> APPPORT_BRIDGE_UPSTREAM=<Memos origin> node appport-bridge/appworks/memos-reactions/runtime/host.mjs",
+  "adoption": {
+    "questions": {
+      "q-adopt-contract": { "impact": "contract", "disposition": "resolved", "reason": "This adoption answers it: org.appworks.contracts.memos memos.reactions.list@1 is adopted into the Memos bridge's integration as the file the promotion adds, under that contract id. It is not registered anywhere else." },
+      "q-anonymous": { "impact": "security", "disposition": "accepted", "reason": "Through AppPort a credential is always required, which is narrower than Memos' PublicMethods and never wider; authorization.unauthenticated-denied and the other authorization behaviors passed against the real Memos for exactly this contract. Offering anonymous reads would be a new contract version." },
+      "q-merge-bridge": { "impact": "process", "disposition": "resolved", "reason": "rkendel1/memos merged appport/bridge-manifest-attributes into its main in #2 (4fd4626). Upstream usememos/memos is not established." }
+    }
+  },
+  "limitations": [
+    { "code": "additive-host", "description": "The promotion adds the capability as a host beside the bridge (appport-bridge/appworks/memos-reactions/runtime/host.mjs), composing the unmodified bridge; the bridge's own entry point (bridge.mjs) is unchanged and does not serve memos.reactions.list." },
+    { "code": "host-locates-bridge", "description": "The promoted host is the verified file, byte for byte, so it still locates the bridge through MEMOS_REPO (the repository root) rather than a relative path." },
+    { "code": "dependencies-unchanged", "description": "The patch does not change appport-bridge/package.json or its lockfile. The promotion's requirements record what the lockfile pins against what the host was verified with." }
+  ]
+}

@@ -232,3 +232,52 @@ export async function acquireCheckout(input: { destination: string; fetchUrl: st
   const head = gitIdentity(input.destination).revision;
   if (head !== input.sha) throw new WorkspaceError("REVISION_MISMATCH", `the isolated checkout is at ${head ?? "no revision"}, not ${input.sha}`);
 }
+
+/**
+ * A fresh, isolated promotion worktree at `sha`, fetched from the pinned checkout (a read: the pinned checkout is never
+ * written). Its origin is the canonical URL, so it is the same repository at the same revision.
+ */
+export async function createPromotionWorktree(input: { destination: string; pinnedCheckout: string; canonicalUrl: string; sha: string }): Promise<void> {
+  await acquireCheckout({ destination: input.destination, fetchUrl: input.pinnedCheckout, canonicalUrl: input.canonicalUrl, sha: input.sha });
+}
+
+export interface WorktreeState {
+  head?: string;
+  /** Every changed or untracked path, `git status --porcelain` style: `??` untracked, `A ` added, ` M` modified, ... */
+  entries: Array<{ status: string; path: string }>;
+}
+
+/** HEAD and every change in a worktree the workspace owns (never the pinned checkout: this refreshes the index). */
+export async function worktreeState(worktree: string): Promise<WorktreeState> {
+  const out = await git(["-C", worktree, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=no"], {});
+  const entries = out
+    .split("\0")
+    .filter(Boolean)
+    .map((line) => ({ status: line.slice(0, 2), path: line.slice(3) }));
+  const head = gitIdentity(worktree).revision;
+  return { ...(head ? { head } : {}), entries };
+}
+
+/** The complete diff of the worktree against `base`, every change staged first: what a reviewer reads. */
+export async function worktreePatch(worktree: string, base: string): Promise<string> {
+  await git(["-C", worktree, "add", "--all"], {});
+  return git(["-C", worktree, "diff", "--cached", "--binary", "--full-index", "--no-color", "--no-ext-diff", base], {});
+}
+
+/** The paths a commit changed relative to its parent, and its parent. */
+export async function commitInfo(worktree: string, commit: string): Promise<{ parent?: string; paths: string[] }> {
+  const parent = (await git(["-C", worktree, "rev-parse", `${commit}^`], {}).catch(() => "")).trim();
+  const paths = (await git(["-C", worktree, "diff", "--name-only", "-z", `${commit}^`, commit], {}).catch(() => "")).split("\0").filter(Boolean);
+  return { ...(parent ? { parent } : {}), paths };
+}
+
+/**
+ * Commits the staged worktree on `branch`, with a fixed identity and date, unsigned: a local commit in the workspace's
+ * own worktree. Nothing is pushed.
+ */
+export async function commitWorktree(worktree: string, input: { branch: string; message: string; date: string }): Promise<string> {
+  const identity = { GIT_AUTHOR_NAME: "AppWorks", GIT_AUTHOR_EMAIL: "appworks@localhost", GIT_COMMITTER_NAME: "AppWorks", GIT_COMMITTER_EMAIL: "appworks@localhost", GIT_AUTHOR_DATE: input.date, GIT_COMMITTER_DATE: input.date };
+  await git(["-C", worktree, "checkout", "--quiet", "-B", input.branch], {});
+  await git(["-C", worktree, "-c", "commit.gpgsign=false", "-c", "user.useConfigOnly=false", "commit", "--quiet", "--no-verify", "-m", input.message], identity);
+  return (await git(["-C", worktree, "rev-parse", "HEAD"], {})).trim();
+}

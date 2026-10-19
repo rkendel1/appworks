@@ -134,6 +134,8 @@ after, and stops otherwise. Discovery uses AppPort's client (`appport.manifest`)
 | The commit's files | git, by SHA, into an isolated checkout (no `@appport/github` contract exists for it) |
 | Existing capabilities | `@appport/client` `discoverApplication`; claims through `@appport/protocol` `claimsFor` and `evaluateFulfillment` |
 | Assessment, plan validation, verification | `assessRepository`, `verifyAssessment`; `createExtraction` (without results), `readPlan`, `candidateRefusals`, `verifyExtractionAt` |
+| Contract adoption | `isCanonicalContract`, `capabilityDigest`, `contractDigest`, `compareSchemas`, `digestOf` (`@appport/protocol`); `contractProblems`, `fulfillmentProblems`, `contractChanges`, `verifyExtraction` (`@appport/extraction`). No registry: the adopted contract is a file the promotion adds, published through the application's own boundary |
+| Promotion | a reviewed promotion plan per extraction; byte-for-byte copies of verified files; an isolated git worktree of the pinned revision; the extraction's own behavioral suite and mutation check run against the promoted copy |
 | Presentation | stack-ui 0.5.0 static release (vendored, unmodified) |
 
 Not used, with the reason in `spec/workspace-1.md` §10 and the package README: `@appport/services` jobs, secrets, API keys and webhooks;
@@ -152,6 +154,9 @@ AppWorks introduces none. In particular:
   (unknown). It is not AppPort verification evidence, and its `scope` states that it grants nothing, verifies nothing and modified nothing;
 * the workspace's approvals are per action class and per exact subject, and are enforced where the action runs; a verified extraction
   is not an approval, and `ready-for-promotion` deploys nothing;
+* an adopted contract is a reviewed decision to publish a contract through the application's own integration; it grants no authority,
+  registers nothing and claims no equivalence. A verified promotion is verified for exactly the extraction's subject, not approved for
+  review, commit, push or production;
 * an extraction's verification records state, per behavior, what a named procedure established for one source revision, contract and
   adapter. They are not authorization: a caller still needs its own application credential and AppPort's authorization at the boundary,
   and discovering the capability grants nothing.

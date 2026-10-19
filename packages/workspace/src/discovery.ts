@@ -20,6 +20,9 @@ export interface DiscoveredCapabilityRecord {
   /** Input and output property names from the authoritative manifest, when it verified. */
   input?: { properties: string[]; required: string[] };
   output?: { properties: string[] };
+  /** The declared schemas themselves (records made before they were kept have none: comparisons with them are unknown). */
+  inputSchema?: unknown;
+  outputSchema?: unknown;
   /** Fulfillment claims this capability publishes, each with its evaluation when the canonical contract is at hand. */
   claims: Array<{ claim: FulfillmentClaim; evaluation: "valid" | "invalid" | "not-evaluated"; findings: string[] }>;
 }
@@ -98,7 +101,7 @@ export async function discoverCapabilities(input: { endpoint?: string; integrati
       status: c.status,
       reasons: c.reasons,
       ...(c.declared ? { effect: c.declared.effect, authorization: c.declared.authorization } : {}),
-      ...(definition ? { input: shape(definition.inputSchema), output: { properties: shape(definition.outputSchema).properties } } : {}),
+      ...(definition ? { input: shape(definition.inputSchema), output: { properties: shape(definition.outputSchema).properties }, inputSchema: definition.inputSchema, outputSchema: definition.outputSchema } : {}),
       claims
     };
   });

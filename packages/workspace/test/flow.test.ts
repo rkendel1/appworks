@@ -6,16 +6,17 @@ import { tempDir } from "./helpers.js";
 
 describe("feltdb.flow is the authority for the workspace's model", () => {
   it("declares the collections, the workflow's stages and steps, and the approval actions the code runs on", () => {
-    expect(Object.keys(MODEL.collections)).toEqual(["Project", "StageEvent", "Run", "Artifact", "Approval", "Decision", "Verification"]);
-    expect(STAGES).toEqual(["project-selected", "repository-acquired", "revision-pinned", "integration-inspected", "capabilities-discovered", "assessment-completed", "inventory-reconciled", "candidate-selected", "extraction-planned", "awaiting-approval", "extraction-executed", "verification-completed", "ready-for-promotion"]);
+    expect(Object.keys(MODEL.collections)).toEqual(["Project", "StageEvent", "Run", "Artifact", "Approval", "Decision", "Verification", "Promotion"]);
+    expect(STAGES).toEqual(["project-selected", "repository-acquired", "revision-pinned", "integration-inspected", "capabilities-discovered", "assessment-completed", "inventory-reconciled", "candidate-selected", "extraction-planned", "awaiting-approval", "extraction-executed", "verification-completed", "ready-for-promotion", "contract-proposed", "contract-adopted", "promotion-proposed", "promotion-applied", "promotion-verified", "ready-for-review", "submitted-for-review"]);
+    expect(STEPS["apply-promotion"]).toEqual({ name: "apply-promotion", from: ["promotion-proposed"], rerun: [], to: "promotion-applied", evidence: "patch", approval: "modify-integration" });
     expect(STEPS.execute).toEqual({ name: "execute", from: ["awaiting-approval"], rerun: [], to: "extraction-executed", evidence: "extraction", approval: "generate-files" });
-    expect(MODEL.approvalActions).toEqual(["generate-files", "modify-integration", "commit", "push", "pull-request", "promote"]);
+    expect(MODEL.approvalActions).toEqual(["generate-files", "adopt-contract", "modify-integration", "commit", "push", "pull-request", "promote"]);
   });
 
   it("refuses a flow that is not self-consistent", () => {
     const source = readFileSync(FLOW_PATH, "utf8");
     expect(() => loadFlow(source.replace("    to ready-for-promotion\n", "    to deployed\n"))).toThrow(/step verify names undeclared stage ready-for-promotion/);
-    expect(() => loadFlow(source.replace("verification-completed, ready-for-promotion)", "verification-completed, ready-for-promotion, deployed)"))).toThrow(/Project.stage must enumerate exactly the workflow's stages/);
+    expect(() => loadFlow(source.replace("ready-for-review, submitted-for-review)", "ready-for-review, submitted-for-review, deployed)"))).toThrow(/Project.stage must enumerate exactly the workflow's stages/);
     expect(() => loadFlow(source.replace("approval generate-files", "approval deploy"))).toThrow(/undeclared approval deploy/);
     expect(() => loadFlow(source.replace("from awaiting-approval", "from nowhere"))).toThrow(/undeclared stage nowhere/);
     expect(() => loadFlow(source.replace("evidence integration", "run integration"))).toThrow(/unknown statement/);
@@ -42,7 +43,7 @@ describe("feltdb.flow is the authority for the workspace's model", () => {
       const deployed = await store.db.collection("_flow_apps").get("appworks_workspace");
       expect((deployed as { status: string }).status).toBe("active");
       const models = await store.db.collection("_flow_collection_models").find({ app: "appworks_workspace" });
-      expect(models.map((m) => (m as { name: string }).name).sort()).toEqual(["Approval", "Artifact", "Decision", "Project", "Run", "StageEvent", "Verification"]);
+      expect(models.map((m) => (m as { name: string }).name).sort()).toEqual(["Approval", "Artifact", "Decision", "Project", "Promotion", "Run", "StageEvent", "Verification"]);
       const workflows = await store.db.collection("_flow_workflows").find({ app: "appworks_workspace" });
       expect((workflows[0] as { steps: Array<{ name: string }> }).steps.map((s) => s.name)).toContain("execute");
       const error = await store.commit([{ collection: "Run", id: "r1", value: { id: "r1", projectId: "p", secret: "x" }, create: true }]).catch((e) => e);

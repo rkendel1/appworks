@@ -11,7 +11,10 @@
 //   MEMOS_REPO=<checkout at e0ce856> node --import ./runtime/register.mjs --test test/behavior.test.mjs
 //
 // APPWORKS_HOST_DIR replaces runtime/ by another directory holding host.mjs and adapter.mjs (scripts/mutations.mjs
-// runs this suite against deliberately broken adapters this way; such runs are never recorded).
+// runs this suite against deliberately broken adapters this way; such runs are never recorded). With
+// APPWORKS_RECORD_PROMOTED_HOST=1 a run against another host directory is recorded only if that directory is a
+// byte-for-byte copy of the verified host, adapter, declaration and contract (promotion/verify.mjs: the copy promoted
+// into the application's repository); a mutant never is.
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -25,7 +28,7 @@ import { FULFILLMENT_EXTENSION, canonicalize, claimFor, claimsFor, compareSchema
 import { fromJSONSchema } from "@appport/schema";
 import { toCapabilityOutput } from "../runtime/adapter.mjs";
 import { confirmPublished } from "../runtime/declaration.mjs";
-import { BUILT, HERE, MEMOS_BUILD, PINNED_REVISION, behavior, contract, plan, subjectOf, treeHash, writeResults } from "./support/verification.mjs";
+import { BUILT, HERE, MEMOS_BUILD, PINNED_REVISION, behavior, contract, isVerifiedHostCopy, plan, subjectOf, treeHash, writeResults } from "./support/verification.mjs";
 
 const repo = process.env.MEMOS_REPO ? resolve(process.env.MEMOS_REPO) : undefined;
 if (!repo) {
@@ -114,7 +117,8 @@ if (!repo) {
     oracle?.close();
     if (!memosStopped) await app?.stop();
     if (app) removeDir(app.work);
-    if (!process.env.APPWORKS_HOST_DIR) writeResults(subjectOf(repo), { startedAt, finishedAt: new Date().toISOString(), runner: `node ${process.version}` });
+    const recordable = !process.env.APPWORKS_HOST_DIR || (process.env.APPWORKS_RECORD_PROMOTED_HOST === "1" && isVerifiedHostCopy(HOST_DIR));
+    if (recordable) writeResults(subjectOf(repo), { startedAt, finishedAt: new Date().toISOString(), runner: `node ${process.version}` });
   });
 
   behavior(["integration.source-revision"], "integration-test", "real-application", "the checkout is the pinned source revision", () => {

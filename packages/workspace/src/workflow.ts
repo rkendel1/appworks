@@ -14,19 +14,21 @@
  * A job record never decides anything: the project record and its evidence do.
  */
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { assessRepository, gitIdentity, verifyAssessment, type ApplicationAssessment } from "@appport/assessment";
 import { createExtraction, ExtractionRefused, observeCheckout, readPlan, verifyExtractionAt, type CapabilityExtraction } from "@appport/extraction";
-import type { AppPortManifest } from "@appport/protocol";
+import { digestOf, type AppPortManifest } from "@appport/protocol";
 import { requireAllowed, parseCredentialReference, type Authority, type CredentialResolver } from "./authority.js";
 import { discoverCapabilities, type DiscoveryRecord } from "./discovery.js";
 import { inspectIntegration, treeHash, type IntegrationRecord } from "./inspect.js";
-import { APPROVAL_ACTIONS, MODEL, STAGES, STEPS, stagesAfter, WorkspaceError, type ApprovalAction, type ApprovalRecord, type ArtifactKind, type ArtifactRecord, type Principal, type Project, type Reason, type RepositoryIdentity, type Run, type Stage, type StageEvent, type StepName, type VerificationRecord } from "./model.js";
+import { APPROVAL_ACTIONS, MODEL, STAGES, STEPS, stagesAfter, WorkspaceError, type ApprovalAction, type ApprovalRecord, type ArtifactKind, type ArtifactRecord, type Principal, type Project, type PromotionRecord, type Reason, type RepositoryIdentity, type Run, type Stage, type StageEvent, type StepName, type VerificationRecord } from "./model.js";
+import { adoptionProblems, proposeAdoption, type ContractAdoption } from "./adoption.js";
+import { buildPromotion, patchDigest, promotionProblems, readPromotionPlan, worktreeFileDigests, writePromotionFiles, type Promotion } from "./promotion.js";
 import { reconcile, type ExtractionBinding, type InventoryRecord, type MatchDecision } from "./reconcile.js";
-import { acquireCheckout, type RepositoryProvider } from "./repository.js";
-import { directoryDigest, listExtractions, runExtraction, type ExtractionEntry } from "./runner.js";
+import { acquireCheckout, commitInfo, commitWorktree, createPromotionWorktree, worktreePatch, worktreeState, type RepositoryProvider } from "./repository.js";
+import { directoryDigest, listExtractions, runExtraction, runPromotionVerification, type ExtractionEntry } from "./runner.js";
 import { sha256, Store, type Write } from "./store.js";
 
 export interface WorkspaceOptions {
@@ -44,6 +46,16 @@ export interface WorkspaceOptions {
   /** Discovery's fetch (tests). */
   fetch?: typeof globalThis.fetch;
   runnerTimeoutMs?: number;
+  /** Tests only: called at named points of a step; throwing `SimulatedCrash` stops the run as if the process died. */
+  faultPoint?: (name: string, context: { project: string; worktree?: string }) => void;
+}
+
+/** Thrown by a test's fault point: the run stops without recording anything, as if its process had been killed. */
+export class SimulatedCrash extends Error {
+  constructor(point: string) {
+    super(`simulated crash at ${point}`);
+    this.name = "SimulatedCrash";
+  }
 }
 
 /** A step that has been claimed: its run id, and the promise of its result. */
@@ -73,7 +85,6 @@ const startsFrom = (step: StepName): { from: Stage[]; to: Stage } => {
   return { from: [...s.from, ...s.rerun], to: s.to };
 };
 
-const digestOf = (value: unknown) => `sha256:${sha256(JSON.stringify(value))}`;
 
 export class Workspace {
   readonly store: Store;
@@ -87,6 +98,7 @@ export class Workspace {
   private readonly leaseMs: number;
   private readonly fetch: typeof globalThis.fetch | undefined;
   private readonly runnerTimeoutMs: number | undefined;
+  private readonly faultPoint: WorkspaceOptions["faultPoint"];
 
   private constructor(store: Store, options: WorkspaceOptions) {
     this.store = store;
@@ -100,6 +112,7 @@ export class Workspace {
     this.leaseMs = options.leaseMs ?? 60_000;
     this.fetch = options.fetch;
     this.runnerTimeoutMs = options.runnerTimeoutMs;
+    this.faultPoint = options.faultPoint;
   }
 
   static async open(options: WorkspaceOptions): Promise<Workspace> {
@@ -130,7 +143,7 @@ export class Workspace {
     return p;
   }
 
-  async records<T>(principal: Principal, collection: "StageEvent" | "Run" | "Artifact" | "Approval" | "Decision" | "Verification", projectId: string): Promise<T[]> {
+  async records<T>(principal: Principal, collection: "StageEvent" | "Run" | "Artifact" | "Approval" | "Decision" | "Verification" | "Promotion", projectId: string): Promise<T[]> {
     await requireAllowed(this.authority, principal, "project.read", { project: projectId });
     return this.store.list<T>(collection, { projectId });
   }
@@ -251,6 +264,8 @@ export class Workspace {
       outcome = await work({ project: p, run, signal: controller.signal });
     } catch (error) {
       clearInterval(heartbeat);
+      // A simulated process death records nothing: the run keeps its (expiring) lease, as after a real kill.
+      if (error instanceof SimulatedCrash) throw error;
       const e = error instanceof WorkspaceError ? error : error instanceof ExtractionRefused ? new WorkspaceError(error.reasons[0]?.code ?? "EXTRACTION_REFUSED", error.message, { reasons: error.reasons }) : new WorkspaceError("STEP_FAILED", (error as Error)?.message ?? String(error));
       await this.recordFailure(principal, id, step, run, e);
       throw e;
@@ -281,7 +296,7 @@ export class Workspace {
     };
     delete next.failure;
     delete next.activeRun;
-    const event: StageEvent = { id: `${id}.${String(p.history).padStart(4, "0")}`, projectId: id, sequence: p.history, step: (APPROVAL_ACTIONS as readonly string[]).includes(step) ? "action" : (step as StepName), from: p.stage, to: target, condition: next.condition.state, at, actor: principal.id, evidence: outcome.evidence ?? [], reasons: outcome.partial ?? [], ...(outcome.note ? { note: outcome.note } : {}) };
+    const event: StageEvent = { id: `${id}.${String(p.history).padStart(4, "0")}`, projectId: id, sequence: p.history, step: !(step in STEPS) ? "action" : (step as StepName), from: p.stage, to: target, condition: next.condition.state, at, actor: principal.id, evidence: outcome.evidence ?? [], reasons: outcome.partial ?? [], ...(outcome.note ? { note: outcome.note } : {}) };
     try {
       if (!current || current.status !== "running" || p.activeRun !== run.id) throw new WorkspaceError("CONFLICT", `run ${run.id} no longer holds the project`);
       await this.store.commit([
@@ -308,7 +323,7 @@ export class Workspace {
       const at = this.iso();
       const writes: Write[] = [{ collection: "Run", id: run.id, value: { ...current, status: "failed", finishedAt: at, error: { code: error.code, message: error.message } } as never, ifVersion: current.__version }, ...((error.details.writes as Write[] | undefined) ?? [])];
       if (p.activeRun === run.id && p.condition.state !== "cancelled") {
-        const isAction = (APPROVAL_ACTIONS as readonly string[]).includes(step);
+        const isAction = !(step in STEPS);
         // A refused action leaves the workflow where it was: only a failed workflow step marks the project failed.
         const next: Project = isAction
           ? { ...p, updatedAt: at, history: p.history + 1 }
@@ -551,7 +566,21 @@ export class Workspace {
       const s = await this.generateSubject(p);
       return { subject: s.subject, description: s.description };
     }
-    if (action === "modify-integration") return { subject: digestOf({ action, revision: p.revision?.sha, integration: p.current.integration }), description: "Change the application's AppPort integration in the target repository." };
+    if (action === "adopt-contract") {
+      const a = await this.body<ContractAdoption>(p.current.adoption, "contract-adoption proposal");
+      return { subject: a.body.digest, description: `Adopt ${a.body.contract.application} ${a.body.contract.capability}@${a.body.contract.version} (${a.body.contract.capabilityDigest}) into ${p.repository.owner}/${p.repository.name}'s AppPort integration, as proposed: ${a.body.differences.length} differences, ${a.body.questions.length} questions, ${a.body.blocking.length} blocking. Adoption grants no authority and registers nothing.` };
+    }
+    if (action === "modify-integration") {
+      const a = await this.body<Promotion>(p.current.promotionArtifact, "promotion artifact");
+      return { subject: a.body.digest, description: `Add ${a.body.target.files.length} files under ${a.body.target.directory} of an isolated worktree of ${p.repository.owner}/${p.repository.name} at ${a.body.target.base.slice(0, 12)} (${a.body.target.files.map((f) => f.path).join(", ")}), then run ${a.body.verification.runner.path} against it. Existing files are not modified; nothing is committed, pushed or deployed.` };
+    }
+    if (action === "commit" || action === "push" || (action === "pull-request" && !input.head && !input.base)) {
+      const promotion = await this.currentPromotion(p);
+      if (promotion?.patchDigest) {
+        const subject = digestOf({ action, promotion: promotion.digest, patch: promotion.patchDigest, ...(action !== "commit" ? { commit: promotion.commit ?? null, branch: promotion.branch ?? null, base: p.repository.defaultBranch ?? null } : {}) });
+        return { subject, description: action === "commit" ? `Commit the reviewed patch ${promotion.patchDigest} (promotion ${promotion.digest}) on a local branch of the isolated worktree. Nothing is pushed.` : `${action} the committed promotion ${promotion.commit ?? "(not committed)"} on ${promotion.branch ?? "(no branch)"}.` };
+      }
+    }
     const x = p.current.extraction ? await this.body<CapabilityExtraction>(p.current.extraction, "extraction") : undefined;
     if (action === "promote") return { subject: digestOf({ action, verification: p.current.verification, extraction: x?.body.digest }), description: `Promote the verified extraction ${x ? `${x.body.identity.name} revision ${x.body.identity.revision} (${x.body.digest})` : ""} to a deployment.` };
     if (action === "pull-request") {
@@ -572,17 +601,27 @@ export class Workspace {
     if (p.condition.state === "cancelled") throw new WorkspaceError("PROJECT_CANCELLED", "the project is cancelled");
     const current = await this.approvalSubject(principal, id, input.action, { ...(input.head ? { head: input.head } : {}), ...(input.base ? { base: input.base } : {}) });
     if (input.subject !== current.subject) throw new WorkspaceError("APPROVAL_SUBJECT_MISMATCH", `the subject to approve is ${current.subject}; ${input.subject} is not (the inputs changed, or another action was meant)`);
+    const extra: Write[] = [];
+    if (input.action === "adopt-contract") {
+      const a = await this.body<ContractAdoption>(p.current.adoption, "contract-adoption proposal");
+      if (a.body.blocking.length) throw new WorkspaceError("ADOPTION_BLOCKED", `the proposal has ${a.body.blocking.length} blocking items and cannot be approved: ${a.body.blocking.map((b) => b.code + " " + b.subject).join("; ")}`);
+    }
     const at = this.iso();
     const recordId = `${id}.approval.${input.action}.${current.subject.slice(7, 19)}`;
     const existing = await this.store.get<ApprovalRecord>("Approval", recordId);
     if (existing && existing.status === "granted") return existing;
     if (existing && existing.status === "consumed") throw new WorkspaceError("APPROVAL_CONSUMED", "this approval was already used; the action ran");
     const approval: ApprovalRecord = { ...(existing ?? { id: recordId, projectId: id, action: input.action, subject: current.subject, subjectDescription: current.description, requestedAt: at, requestedBy: principal.id }), status: "granted", grantedAt: at, grantedBy: principal.id } as ApprovalRecord;
+    if (input.action === "modify-integration") {
+      const promotion = await this.currentPromotion(p);
+      if (promotion && promotion.digest === current.subject && promotion.state === "proposed") extra.push({ collection: "Promotion", id: promotion.id, value: { ...promotion, state: "approved", approval: recordId, updatedAt: at } as never, ifVersion: promotion.__version! });
+    }
     const event: StageEvent = { id: `${id}.${String(p.history).padStart(4, "0")}`, projectId: id, sequence: p.history, step: "approve", from: p.stage, to: p.stage, condition: p.condition.state, at, actor: principal.id, evidence: [recordId, current.subject], reasons: [], note: `approved ${input.action}` };
     await this.store.commit([
       existing ? { collection: "Approval", id: recordId, value: approval as never, ifVersion: (existing as ApprovalRecord & { __version: number }).__version } : { collection: "Approval", id: recordId, value: approval as never, create: true },
       { collection: "Project", id, value: { ...p, updatedAt: at, history: p.history + 1 } as never, ifVersion: p.__version },
-      { collection: "StageEvent", id: event.id, value: event as never, create: true }
+      { collection: "StageEvent", id: event.id, value: event as never, create: true },
+      ...extra
     ]);
     return approval;
   }
@@ -808,16 +847,345 @@ export class Workspace {
         return this.verify(principal, id, resuming);
       case "ready":
         return this.ready(principal, id, resuming);
-      case "pull-request":
-        return this.pullRequest(principal, id, { head: s("head") ?? "", base: s("base") ?? "", ...(s("title") ? { title: s("title")! } : {}) }, resuming);
+      case "propose-contract":
+        return this.proposeContract(principal, id, resuming);
+      case "adopt-contract":
+        return this.adoptContract(principal, id, resuming);
+      case "propose-promotion":
+        return this.proposePromotion(principal, id, resuming);
+      case "apply-promotion":
+        return this.applyPromotion(principal, id, resuming);
+      case "verify-promotion":
+        return this.verifyPromotion(principal, id, resuming);
+      case "prepare-review":
+        return this.prepareReview(principal, id, resuming);
+      case "submit-review":
+        return this.submitReview(principal, id);
       case "commit":
+        return this.commitPromotion(principal, id, resuming);
+      case "pull-request":
+        if (!s("head") && !s("base")) return this.submitReview(principal, id);
+        return this.pullRequest(principal, id, { head: s("head") ?? "", base: s("base") ?? "", ...(s("title") ? { title: s("title")! } : {}) }, resuming);
       case "push":
       case "promote":
-      case "modify-integration":
         return this.unsupportedAction(principal, id, step as ApprovalAction);
       default:
         return Promise.reject(new WorkspaceError("INVALID_INPUT", `unknown step ${step}`));
     }
+  }
+
+  // ---- contract adoption and promotion -------------------------------------------------------------------------
+
+  /** The promotion record of the project's current promotion artifact, if there is one. */
+  private async currentPromotion(p: Project): Promise<(PromotionRecord & { __version: number }) | undefined> {
+    const record = p.current.promotionArtifact ? await this.store.get<ArtifactRecord>("Artifact", p.current.promotionArtifact) : undefined;
+    return record?.digest ? this.store.get<PromotionRecord>("Promotion", `${p.id}.promotion.${record.digest.slice(7, 23)}`) : undefined;
+  }
+
+  /** Everything a contract-adoption proposal is made from, as it is now. */
+  private async adoptionInputs(p: Project) {
+    const x = await this.body<CapabilityExtraction>(p.current.extraction, "extraction");
+    const assessment = await this.body<ApplicationAssessment>(p.current.assessment, "assessment");
+    const discovery = await this.body<DiscoveryRecord>(p.current.discovery, "discovery");
+    const inventory = await this.body<InventoryRecord>(p.current.inventory, "inventory");
+    const selection = await this.selection(p);
+    const entry = this.entryFor(selection.candidate);
+    const candidate = assessment.body.candidates.find((c) => c.id === selection.candidate);
+    if (!candidate) throw new WorkspaceError("CANDIDATE_NOT_FOUND", `${selection.candidate} is not in the current assessment`);
+    const planned = JSON.parse(readFileSync(entry.planPath, "utf8")) as { contract: string; fulfillment?: { declaration: string } };
+    const readJson = (path: string | undefined) => {
+      if (!path) return undefined;
+      try {
+        return JSON.parse(readFileSync(join(entry.directory, path), "utf8")) as unknown;
+      } catch {
+        return undefined;
+      }
+    };
+    let dispositions = {};
+    try {
+      dispositions = readPromotionPlan(entry).plan.adoption?.questions ?? {};
+    } catch (error) {
+      if (!(error instanceof WorkspaceError && error.code === "PROMOTION_PLAN_MISSING")) throw error;
+    }
+    return {
+      entry,
+      input: {
+        extraction: x.body,
+        candidate,
+        contract: readJson(planned.contract),
+        declaration: readJson(planned.fulfillment?.declaration),
+        discovery: discovery.body,
+        matches: inventory.body.candidates.find((c) => c.id === candidate.id)?.matches.map((m) => m.capability) ?? [],
+        dispositions
+      }
+    };
+  }
+
+  /**
+   * Proposes adopting the verified extraction's contract into the target integration: every difference with what
+   * supports it, the open questions, and AppPort's validation. Blocking items keep the project partial and the proposal
+   * unapprovable.
+   */
+  proposeContract(principal: Principal, id: string, resuming = false): Promise<Started> {
+    return this.begin(principal, id, "propose-contract", { stage: startsFrom("propose-contract"), resuming }, async ({ project: p, run }) => {
+      this.assertRevision(p);
+      const v = p.current.verification ? await this.store.get<VerificationRecord>("Verification", p.current.verification) : undefined;
+      if (!v || v.status !== "verified") throw new WorkspaceError("NOT_VERIFIED", "only a verified extraction's contract can be proposed for adoption");
+      const stale = await this.freshness(p, v);
+      if (stale.length) throw new WorkspaceError("VERIFICATION_STALE", stale.map((r) => r.message).join("; "));
+      const { input } = await this.adoptionInputs(p);
+      const adoption = proposeAdoption(input);
+      const { record, writes } = await this.existingOrWrite(p, "adoption", adoption, run, { digest: adoption.digest, format: adoption.format, partial: adoption.blocking.map((b) => b.code), summary: { contract: `${adoption.contract.application} ${adoption.contract.capability}@${adoption.contract.version}`, differences: adoption.differences.length, blocking: adoption.blocking.length } });
+      const partial: Reason[] = adoption.blocking.length ? [{ code: "ADOPTION_BLOCKED", message: `${adoption.blocking.length} blocking items: ${adoption.blocking.map((b) => `${b.code} ${b.subject}`).join("; ")}` }] : [];
+      return { writes, current: { adoption: record.id }, partial, evidence: [record.id, adoption.digest], note: `contract adoption proposed: ${adoption.differences.length} differences, ${adoption.blocking.length} blocking` };
+    });
+  }
+
+  /** Adopts exactly the approved proposal, after re-deriving it: inputs that changed since make it stale. */
+  adoptContract(principal: Principal, id: string, resuming = false): Promise<Started> {
+    const current = async (p: Project) => {
+      const stored = await this.body<ContractAdoption>(p.current.adoption, "contract-adoption proposal");
+      const problems = adoptionProblems(stored.body);
+      if (problems.length) throw new WorkspaceError(problems[0]!, "the stored adoption proposal does not match its digest");
+      if (stored.body.blocking.length) throw new WorkspaceError("ADOPTION_BLOCKED", `the proposal has ${stored.body.blocking.length} blocking items: ${stored.body.blocking.map((b) => `${b.code} ${b.subject}`).join("; ")}`);
+      const again = proposeAdoption((await this.adoptionInputs(p)).input);
+      if (again.digest !== stored.body.digest) throw new WorkspaceError("ADOPTION_STALE", "the contract, declaration, extraction, discovery or dispositions changed since the proposal; propose again");
+      return stored;
+    };
+    const guard = async (p: Project) => {
+      const stored = await current(p);
+      await this.requireApproval(principal, p, STEPS["adopt-contract"]!.approval!, stored.body.digest);
+    };
+    return this.begin(principal, id, "adopt-contract", { stage: startsFrom("adopt-contract"), resuming, guard }, async ({ project: p, run }) => {
+      this.assertRevision(p);
+      const stored = await current(p);
+      const approval = await this.requireApproval(principal, p, STEPS["adopt-contract"]!.approval!, stored.body.digest);
+      const decision = { id: `${id}.adoption.${stored.body.digest.slice(7, 19)}`, projectId: id, kind: "contract-adoption", at: this.iso(), by: principal.id, adoption: stored.record.id, adoptionDigest: stored.body.digest, approval: approval.id, contract: stored.body.contract, note: "Adopted into the target's integration as proposed. It grants no authority, registers nothing and is not an equivalence claim." };
+      const exists = await this.store.get("Decision", decision.id);
+      return { writes: [...(exists ? [] : [{ collection: "Decision" as const, id: decision.id, value: decision as never, create: true as const }]), this.consume(approval, run)], current: { adoptionDecision: decision.id }, evidence: [decision.id, stored.body.digest, approval.id], note: `adopted ${stored.body.contract.application} ${stored.body.contract.capability}@${stored.body.contract.version}` };
+    });
+  }
+
+  /** The promotion artifact: deterministic, from the reviewed promotion plan, the verified extraction and the adoption. */
+  proposePromotion(principal: Principal, id: string, resuming = false): Promise<Started> {
+    return this.begin(principal, id, "propose-promotion", { stage: startsFrom("propose-promotion"), resuming }, async ({ project: p, run }) => {
+      this.assertRevision(p);
+      const decision = p.current.adoptionDecision ? await this.store.get<{ adoptionDigest: string }>("Decision", p.current.adoptionDecision) : undefined;
+      const adoption = await this.body<ContractAdoption>(p.current.adoption, "contract-adoption proposal");
+      if (!decision || decision.adoptionDigest !== adoption.body.digest) throw new WorkspaceError("CONTRACT_NOT_ADOPTED", "the current contract-adoption proposal has not been adopted");
+      const x = await this.body<CapabilityExtraction>(p.current.extraction, "extraction");
+      const entry = this.entryFor((await this.selection(p)).candidate);
+      const promotion = buildPromotion({ project: id, checkout: this.store.resolve(p.revision!.checkout), repository: { url: p.repository.url, owner: p.repository.owner, name: p.repository.name }, revision: p.revision!.sha, entry, extraction: x.body, adoptionDigest: adoption.body.digest });
+      const { record, writes } = await this.existingOrWrite(p, "promotion", promotion, run, { digest: promotion.digest, format: promotion.format, summary: { files: promotion.target.files.map((f) => f.path), directory: promotion.target.directory } });
+      const promotionId = `${id}.promotion.${promotion.digest.slice(7, 23)}`;
+      const at = this.iso();
+      const existing = await this.store.get<PromotionRecord>("Promotion", promotionId);
+      const state: PromotionRecord = { id: promotionId, projectId: id, artifact: record.id, digest: promotion.digest, state: "proposed", worktree: join("workspaces", id, p.revision!.sha, "promotions", promotion.digest.slice(7, 23), "worktree"), base: p.revision!.sha, createdAt: at, updatedAt: at };
+      const unmet = promotion.requirements.packages.filter((r) => !r.met);
+      const partial: Reason[] = unmet.length ? [{ code: "REQUIREMENT_UNMET", message: `the target pins ${unmet.map((r) => `${r.name} ${r.target ?? "(absent)"}`).join(", ")} in ${promotion.requirements.lockfile}; the promoted host was verified with ${unmet.map((r) => `${r.name} ${r.required}`).join(", ")}. The patch does not change the target's dependencies` }] : [];
+      return { writes: [...writes, ...(existing ? [] : [{ collection: "Promotion" as const, id: promotionId, value: state as never, create: true as const }])], current: { promotionArtifact: record.id }, partial, evidence: [record.id, promotion.digest], note: `promotion proposed: ${promotion.target.files.length} files under ${promotion.target.directory}${unmet.length ? `; ${unmet.length} runtime requirements unmet in the target` : ""}` };
+    });
+  }
+
+  /** The stored promotion artifact, valid against everything it names as it is now. */
+  private async validPromotion(p: Project): Promise<{ promotion: Promotion; record: ArtifactRecord; state: PromotionRecord & { __version: number }; entry: ExtractionEntry }> {
+    const stored = await this.body<Promotion>(p.current.promotionArtifact, "promotion artifact");
+    const state = await this.currentPromotion(p);
+    if (!state) throw new WorkspaceError("EVIDENCE_MISSING", "the promotion has no record");
+    const x = await this.store.get<ArtifactRecord>("Artifact", p.current.extraction!);
+    const adoption = await this.store.get<ArtifactRecord>("Artifact", p.current.adoption!);
+    const entry = this.entryFor((await this.selection(p)).candidate);
+    const problems = promotionProblems(stored.body, { revision: p.revision?.sha, extractionDigest: x?.digest, adoptionDigest: adoption?.digest, extractionDirectory: entry.directory });
+    if (problems.length) throw new WorkspaceError(problems[0]!.code, problems.map((r) => `${r.code}: ${r.message}`).join("; "), { reasons: problems });
+    return { promotion: stored.body, record: stored.record, state, entry };
+  }
+
+  /** The worktree holds exactly the recorded patch on its base, and nothing else. */
+  private async inspectApplied(worktree: string, promotion: Promotion): Promise<Reason[]> {
+    const state = await worktreeState(worktree);
+    const approved = new Set(promotion.target.files.map((f) => f.path));
+    const out: Reason[] = [];
+    if (state.head !== promotion.target.base) out.push({ code: "WORKTREE_REVISION_CHANGED", message: `the worktree is at ${state.head ?? "no revision"}, not ${promotion.target.base}` });
+    for (const e of state.entries) if (!approved.has(e.path)) out.push({ code: "PATCH_OUTSIDE_APPROVED_SET", message: `${e.path} (${e.status.trim()}) is not in the approved file set` });
+    for (const e of state.entries) if (approved.has(e.path) && !["??", "A "].includes(e.status)) out.push({ code: "PATCH_OPERATION_INVALID", message: `${e.path} is ${e.status.trim()}, not an added file` });
+    const digests = worktreeFileDigests(worktree, [...approved]);
+    for (const f of promotion.target.files) if (digests[f.path] !== f.sha256) out.push({ code: digests[f.path] ? "PATCH_CONTENT_MISMATCH" : "PATCH_INCOMPLETE", message: `${f.path} ${digests[f.path] ? "differs from" : "is missing, not"} the approved file` });
+    return out;
+  }
+
+  /**
+   * Applies exactly the approved promotion to an isolated worktree. Before writing: the approval of this artifact's
+   * digest, the artifact valid against everything it names, the pinned checkout unchanged, the destination holding
+   * nothing unexpected, and the authority rechecked. After: the complete diff inspected, nothing outside the approved
+   * files, revisions rechecked, the patch and its digest recorded. A resumed run inspects the worktree first and never
+   * writes a file twice.
+   */
+  applyPromotion(principal: Principal, id: string, resuming = false): Promise<Started> {
+    const action = STEPS["apply-promotion"]!.approval!;
+    const guard = async (p: Project) => {
+      const { promotion, state } = await this.validPromotion(p);
+      if (!["proposed", "approved"].includes(state.state)) throw new WorkspaceError("INVALID_TRANSITION", `the promotion is ${state.state}`);
+      await this.requireApproval(principal, p, action, promotion.digest);
+    };
+    return this.begin(principal, id, "apply-promotion", { stage: startsFrom("apply-promotion"), resuming, guard }, async ({ project: p, run }) => {
+      const checkout = this.assertRevision(p);
+      const { promotion, state, entry } = await this.validPromotion(p);
+      const approval = await this.requireApproval(principal, p, action, promotion.digest);
+      const worktree = this.store.resolve(state.worktree);
+      const approved = new Set(promotion.target.files.map((f) => f.path));
+      if (!existsSync(join(worktree, ".git"))) {
+        await createPromotionWorktree({ destination: worktree, pinnedCheckout: checkout, canonicalUrl: p.repository.url, sha: promotion.target.base });
+      }
+      // The destination: at the base, and holding nothing but (a resumed run's) approved files with approved bytes.
+      const before = await worktreeState(worktree);
+      if (before.head !== promotion.target.base) throw new WorkspaceError("DESTINATION_DIRTY", `the worktree is at ${before.head ?? "no revision"}, not ${promotion.target.base}`);
+      const unexpected = before.entries.filter((e) => !approved.has(e.path) || !["??", "A "].includes(e.status));
+      if (unexpected.length) throw new WorkspaceError("DESTINATION_DIRTY", `the worktree has unexpected changes: ${unexpected.map((e) => `${e.status.trim()} ${e.path}`).join(", ")}`);
+      await requireAllowed(this.authority, principal, `action:${action}`, { project: id });
+      const { written, present } = writePromotionFiles(promotion, entry.directory, worktree);
+      this.faultPoint?.("after-patch-written", { project: id, worktree });
+      // The complete diff, as git sees it, against the base.
+      const patch = await worktreePatch(worktree, promotion.target.base);
+      const files = promotion.target.files.map((f) => ({ path: f.path, sha256: f.sha256, mode: f.mode }));
+      const digest = patchDigest(promotion.target.base, files);
+      const body = { format: "appworks.patch/1", promotion: promotion.digest, base: promotion.target.base, files, patchDigest: digest, diff: patch };
+      const stored = await this.existingOrWrite(p, "patch", body, run, { digest, summary: { files: files.length, written: written.length, alreadyPresent: present.length } });
+      const problems = await this.inspectApplied(worktree, promotion);
+      this.assertRevision(p);
+      if (problems.length) {
+        // The patch and the evidence stay: the worktree is not cleaned up, and the patch as found is recorded.
+        throw new WorkspaceError(problems[0]!.code, problems.map((r) => r.message).join("; "), { reasons: problems, writes: [...stored.writes, { collection: "Promotion", id: state.id, value: { ...state, patch: stored.record.id, reasons: problems, updatedAt: this.iso() }, ifVersion: state.__version }] });
+      }
+      const at = this.iso();
+      return {
+        writes: [...stored.writes, { collection: "Promotion", id: state.id, value: { ...state, state: "applied", approval: approval.id, appliedAt: state.appliedAt ?? at, patch: stored.record.id, patchDigest: digest, files, updatedAt: at, reasons: [] } as never, ifVersion: state.__version }, this.consume(approval, run)],
+        current: { patch: stored.record.id },
+        evidence: [stored.record.id, digest, approval.id],
+        note: `applied ${files.length} files to the isolated worktree (${written.length} written, ${present.length} already present); patch ${digest}`
+      };
+    });
+  }
+
+  /**
+   * Runs the promotion's verification against the applied worktree and judges it: the subject the promoted copy
+   * produced must be exactly the extraction's, every required behavior must pass against what it passed against
+   * before, every mutant must be caught, and the worktree must be the patch before and after.
+   */
+  verifyPromotion(principal: Principal, id: string, resuming = false): Promise<Started> {
+    return this.begin(principal, id, "verify-promotion", { stage: startsFrom("verify-promotion"), resuming }, async ({ project: p, run, signal }) => {
+      this.assertRevision(p);
+      const { promotion, state, entry } = await this.validPromotion(p);
+      if (!["applied", "verified", "verification-failed", "ready-for-review"].includes(state.state) || !state.patchDigest) throw new WorkspaceError("INVALID_TRANSITION", `the promotion is ${state.state}, not applied`);
+      const approval = state.approval ? await this.store.get<ApprovalRecord>("Approval", state.approval) : undefined;
+      if (!approval || approval.status !== "consumed" || approval.subject !== promotion.digest) throw new WorkspaceError("APPROVAL_REQUIRED", "the applied patch was not applied under an approval of this promotion");
+      const worktree = this.store.resolve(state.worktree);
+      const before = await this.inspectApplied(worktree, promotion);
+      if (before.length) throw new WorkspaceError("WORKTREE_CHANGED", before.map((r) => r.message).join("; "), { reasons: before });
+      const work = join(tmpdir(), `appworks-promotion-${run.id.replace(/[^A-Za-z0-9_-]/g, "_")}`);
+      mkdirSync(work, { recursive: true });
+      const output = join(work, "verification.json");
+      const result = await runPromotionVerification(entry, promotion.verification.runner.path, { worktree, host: join(worktree, promotion.verification.host), output, mutations: promotion.verification.mutations, signal, ...(this.runnerTimeoutMs ? { timeoutMs: this.runnerTimeoutMs } : {}) });
+      const log = await this.existingOrWrite(p, "promotion-log", { format: "appworks.runner-log/1", runner: promotion.verification.runner.path, exitCode: result.exitCode, signal: result.signal, timedOut: result.timedOut, output: result.output }, run, { summary: { exitCode: result.exitCode } });
+      let summary: { results?: { subject: Record<string, string>; behaviors: Record<string, { status: string; against?: string }> }; worktreeUnchanged?: boolean; mutations?: { caught: number; total: number } | null };
+      try {
+        summary = JSON.parse(readFileSync(output, "utf8"));
+      } catch {
+        throw new WorkspaceError(signal.aborted ? "RUN_CANCELLED" : "RUNNER_FAILED", `the promotion verification runner exited ${result.exitCode ?? result.signal} without results; see ${log.record.id}`, { writes: log.writes });
+      } finally {
+        rmSync(work, { recursive: true, force: true });
+      }
+      const after = await this.inspectApplied(worktree, promotion);
+      const reasons: Reason[] = [...after.map((r) => ({ ...r, code: "WORKTREE_CHANGED" }))];
+      const results = summary.results;
+      if (!results) reasons.push({ code: "RESULTS_MISSING", message: "the runner recorded no behavior results (the promoted host is not a verified copy, or the suite did not run)" });
+      else {
+        for (const [k, v] of Object.entries(promotion.verification.subject)) if (results.subject[k] !== v) reasons.push({ code: "SUBJECT_MISMATCH", message: `${k} is ${results.subject[k]}, the verified extraction's is ${v}` });
+        for (const b of promotion.verification.required) {
+          const r = results.behaviors[b];
+          if (!r || r.status !== "passed") reasons.push({ code: "BEHAVIOR_NOT_PASSED", message: `${b}: ${r?.status ?? "not run"}` });
+          else if (r.against !== promotion.verification.against[b]) reasons.push({ code: "BEHAVIOR_TARGET_CHANGED", message: `${b} passed against ${r.against}, the extraction's against ${promotion.verification.against[b]}` });
+        }
+      }
+      if (promotion.verification.mutations && !(summary.mutations && summary.mutations.total > 0 && summary.mutations.caught === summary.mutations.total)) reasons.push({ code: "MUTANT_SURVIVED", message: summary.mutations ? `${summary.mutations.caught} of ${summary.mutations.total} mutants caught` : "the mutation check did not run" });
+      if (summary.worktreeUnchanged !== true) reasons.push({ code: "WORKTREE_CHANGED", message: "the runner reports the worktree changed during verification" });
+      const status = reasons.length ? "not-verified" : "verified";
+      const record = { format: "appworks.promotion-verification/1", promotion: promotion.digest, patchDigest: state.patchDigest, status, reasons, results: results ?? null, mutations: summary.mutations ?? null, runner: { exitCode: result.exitCode, log: log.record.id } };
+      const stored = await this.existingOrWrite(p, "promotion-verification", record, run, { digest: digestOf(record), summary: { status, reasons: reasons.length } });
+      const at = this.iso();
+      return {
+        writes: [...log.writes, ...stored.writes, { collection: "Promotion", id: state.id, value: { ...state, state: status === "verified" ? "verified" : "verification-failed", verification: stored.record.id, verificationStatus: status, reasons, updatedAt: at } as never, ifVersion: state.__version }],
+        current: { promotionVerification: stored.record.id },
+        partial: status === "verified" ? [] : [{ code: "PROMOTION_NOT_VERIFIED", message: reasons.map((r) => `${r.code}: ${r.message}`).join("; ") }],
+        evidence: [stored.record.id, log.record.id],
+        note: `promotion ${status}${reasons.length ? `: ${reasons.length} reasons` : ""}`
+      };
+    });
+  }
+
+  /** Marks a verified promotion ready for review, after re-checking that every input is still what was verified. */
+  prepareReview(principal: Principal, id: string, resuming = false): Promise<Started> {
+    return this.begin(principal, id, "prepare-review", { stage: startsFrom("prepare-review"), resuming }, async ({ project: p }) => {
+      this.assertRevision(p);
+      const { promotion, state } = await this.validPromotion(p);
+      if (state.state !== "verified") throw new WorkspaceError("NOT_VERIFIED", `the promotion is ${state.state}${state.reasons?.length ? `: ${state.reasons.map((r) => r.code).join(", ")}` : ""}`);
+      const verification = await this.body<{ promotion: string; patchDigest: string; status: string }>(p.current.promotionVerification, "promotion verification");
+      if (verification.body.promotion !== promotion.digest || verification.body.patchDigest !== state.patchDigest || verification.body.status !== "verified") throw new WorkspaceError("VERIFICATION_STALE", "the promotion verification is for another promotion or patch");
+      const changed = await this.inspectApplied(this.store.resolve(state.worktree), promotion);
+      if (changed.length) throw new WorkspaceError("WORKTREE_CHANGED", changed.map((r) => r.message).join("; "));
+      return { writes: [{ collection: "Promotion", id: state.id, value: { ...state, state: "ready-for-review", updatedAt: this.iso() } as never, ifVersion: state.__version }], current: { review: state.id }, evidence: [state.id, state.patchDigest!], note: `ready for review: patch ${state.patchDigest}` };
+    });
+  }
+
+  /**
+   * Commits the reviewed patch on a local branch of the isolated worktree, under an approval of exactly that patch. A
+   * commit that is already there (a resumed run) is found and adopted, never made twice. Nothing is pushed.
+   */
+  commitPromotion(principal: Principal, id: string, resuming = false): Promise<Started> {
+    const subject = async (p: Project) => (await this.approvalSubject(principal, id, "commit")).subject;
+    const guard = async (p: Project) => {
+      const state = await this.currentPromotion(p);
+      if (!state || state.state !== "ready-for-review") throw new WorkspaceError("INVALID_TRANSITION", "only a promotion that is ready for review can be committed");
+      await this.requireApproval(principal, p, "commit", await subject(p));
+    };
+    return this.begin(principal, id, "commit", { stage: { from: ["ready-for-review"] }, resuming, guard }, async ({ project: p, run }) => {
+      this.assertRevision(p);
+      const { promotion, state } = await this.validPromotion(p);
+      const approval = await this.requireApproval(principal, p, "commit", await subject(p));
+      const worktree = this.store.resolve(state.worktree);
+      const branch = `appworks/promotion/${promotion.capability.provider.capability}-${promotion.digest.slice(7, 19)}`;
+      const head = (await worktreeState(worktree)).head;
+      let commit: string;
+      if (head && head !== promotion.target.base) {
+        // A commit is already there: adopt it only if it is exactly this patch on this base, with nothing else.
+        const info = await commitInfo(worktree, head);
+        const status = await worktreeState(worktree);
+        const digests = worktreeFileDigests(worktree, promotion.target.files.map((f) => f.path));
+        const exact = info.parent === promotion.target.base && JSON.stringify([...info.paths].sort()) === JSON.stringify(promotion.target.files.map((f) => f.path).sort()) && status.entries.length === 0 && promotion.target.files.every((f) => digests[f.path] === f.sha256);
+        if (!exact) throw new WorkspaceError("WORKTREE_CHANGED", `the worktree's HEAD ${head} is not the reviewed patch on ${promotion.target.base}`);
+        commit = head;
+      } else {
+        const changed = await this.inspectApplied(worktree, promotion);
+        if (changed.length) throw new WorkspaceError("WORKTREE_CHANGED", changed.map((r) => r.message).join("; "));
+        await requireAllowed(this.authority, principal, "action:commit", { project: id });
+        commit = await commitWorktree(worktree, { branch, date: state.appliedAt ?? this.iso(), message: `AppWorks: add ${promotion.capability.provider.capability}@${promotion.capability.provider.version} through the AppPort bridge\n\nPromotion ${promotion.digest}\nPatch ${state.patchDigest}\nExtraction ${promotion.extraction.identity.name} revision ${promotion.extraction.identity.revision} ${promotion.extraction.digest}\nContract ${promotion.capability.contract.application} ${promotion.capability.contract.capability}@${promotion.capability.contract.version} ${promotion.capability.contract.capabilityDigest}\n` });
+        this.faultPoint?.("after-commit", { project: id, worktree });
+      }
+      return { writes: [{ collection: "Promotion", id: state.id, value: { ...state, commit, branch, updatedAt: this.iso() } as never, ifVersion: state.__version }, this.consume(approval, run)], effect: { commit, branch, adopted: head !== promotion.target.base }, evidence: [commit, approval.id], note: `committed ${commit} on local branch ${branch} (not pushed)` };
+    });
+  }
+
+  /**
+   * Submitting for review needs the branch on GitHub: a push, then a pull request. The boundary is enforced (an approval
+   * of exactly this commit), then the action is refused: @appport/github has no push or commit contract, and the
+   * workspace does not push with git behind the integration's back. Nothing is attempted.
+   */
+  async submitReview(principal: Principal, id: string): Promise<Started> {
+    await requireAllowed(this.authority, principal, "project.advance", { project: id });
+    const p = await this.load(id);
+    const state = await this.currentPromotion(p);
+    if (!state || state.state !== "ready-for-review" || !state.commit) throw new WorkspaceError("INVALID_TRANSITION", "submitting needs a promotion that is ready for review and committed");
+    await this.requireApproval(principal, p, STEPS["submit-review"]!.approval!, (await this.approvalSubject(principal, id, "pull-request")).subject);
+    throw new WorkspaceError("UNSUPPORTED", "submitting for review is approved but not supported: it needs the branch pushed to GitHub, and @appport/github 1.0.2 has no push, commit or compare contract");
   }
 
   // ---- gated actions -------------------------------------------------------------------------------------------
@@ -867,7 +1235,7 @@ export class Workspace {
       await this.requireApproval(principal, p, action, subject);
       const why: Record<string, string> = {
         commit: "the extraction writes nothing to the target repository, so there is nothing to commit; @appport/github has no commit contract",
-        push: "@appport/github has no push contract and the workspace pushes nothing itself",
+        push: "@appport/github 1.0.2 has no push or commit contract, and the workspace does not push with git behind the integration",
         promote: "no deployment contract exists for this workspace; nothing is deployed",
         "modify-integration": "the extraction adds its capability through a host beside the unmodified bridge; changing the bridge in the target repository is not a supported action"
       };

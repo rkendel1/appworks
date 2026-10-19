@@ -126,6 +126,23 @@ the adapter digest, the declaration digest and the runtime digest.
 * **Mutations** (`scripts/mutations.mjs`): the suite catches all six known defects. These are fabricating a field, fabricating data,
   swallowing errors, reusing the first caller's credential, publishing no declaration, and publishing a stale claim.
 
+## Promotion
+
+`promotion/` is how this extraction is promoted into Memos by the AppWorks workspace (`spec/workspace-1.md` §11–12): the reviewed
+promotion plan, the README that is added next to the promoted files, and the runner that verifies them.
+
+* **The change:** six files added under `appport-bridge/appworks/memos-reactions/` (the contract, the adapter, the declaration check,
+  the fulfillment claim and the host, each byte for byte the file this extraction verified, and a README). No existing Memos file
+  changes. `runtime/register.mjs` and `runtime/resolve-hooks.mjs` are not promoted: they exist for AppWorks' development only.
+* **Verification:** `promotion/verify.mjs` runs `test/behavior.test.mjs` with the promoted host (`APPWORKS_HOST_DIR`) and records the
+  results only if the promoted files are byte-for-byte the verified ones (`isVerifiedHostCopy`), then runs the mutation check against
+  copies of the promoted host (`APPWORKS_MUTATION_SOURCE`). The subject must be this extraction's own, digest for digest.
+* **Requirement left to the reviewer:** the promoted host needs `@appport/protocol` 1.2.0; the bridge's lockfile pins 1.1.0 at
+  `e0ce856`. The promotion records this as unmet and does not edit the bridge's dependencies or lockfile.
+
+`promotion/` is not part of the extraction's directory digest (what its `generate-files` approval covers): the promotion artifact covers
+it with its own plan and runner digests.
+
 ## Limitations
 
 * Verified on SQLite with synthetic data. MySQL and PostgreSQL drivers, archived memos, Spaces and public-access instance settings were

@@ -48,12 +48,16 @@ export function listExtractions(root: string): ExtractionEntry[] {
     });
 }
 
-/** A digest over every file of an extraction directory (node_modules excepted): what an approval of it covers. */
+/**
+ * A digest over every file of an extraction directory: what an approval of the extraction covers. `node_modules` is
+ * excepted, and so is the top-level `promotion/` directory, which the promotion artifact covers itself (its plan and
+ * runner digests): changing how an extraction is promoted does not change the extraction.
+ */
 export function directoryDigest(directory: string): string {
   const hash = createHash("sha256");
   const visit = (dir: string) => {
     for (const name of readdirSync(dir).sort()) {
-      if (name === "node_modules") continue;
+      if (name === "node_modules" || name === ".mutations" || (dir === directory && name === "promotion")) continue;
       const path = join(dir, name);
       const stat = lstatSync(path);
       if (stat.isDirectory()) visit(path);
@@ -75,9 +79,21 @@ export interface RunnerResult {
 
 /** Runs an extraction's runner. Resolves when it exits; never throws for a non-zero exit (that is a result). */
 export function runExtraction(entry: ExtractionEntry, input: { checkout: string; output: string; timeoutMs?: number; signal?: AbortSignal; onOutput?: (chunk: string) => void }): Promise<RunnerResult> {
+  return runScript(entry.directory, entry.runner, ["--repo", resolve(input.checkout), "--output", resolve(input.output)], input);
+}
+
+/**
+ * Runs an extraction's promotion verification runner (the promotion plan's `verification.runner`):
+ * `--repo <worktree> --host <promoted host directory> --output <file> [--mutations]`. Same environment rules.
+ */
+export function runPromotionVerification(entry: ExtractionEntry, runner: string, input: { worktree: string; host: string; output: string; mutations: boolean; timeoutMs?: number; signal?: AbortSignal }): Promise<RunnerResult> {
+  return runScript(entry.directory, join(entry.directory, runner), ["--repo", resolve(input.worktree), "--host", resolve(input.host), "--output", resolve(input.output), ...(input.mutations ? ["--mutations"] : [])], input);
+}
+
+function runScript(cwd: string, script: string, args: string[], input: { timeoutMs?: number; signal?: AbortSignal; onOutput?: (chunk: string) => void }): Promise<RunnerResult> {
   const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => ALLOWED_ENV.test(k)));
   return new Promise((done, fail) => {
-    const child = spawn(process.execPath, [entry.runner, "--repo", resolve(input.checkout), "--output", resolve(input.output)], { cwd: entry.directory, env, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(process.execPath, [script, ...args], { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
     const chunks: string[] = [];
     let size = 0;
     const keep = (data: Buffer) => {

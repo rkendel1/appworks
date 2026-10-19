@@ -378,6 +378,64 @@
       if (!verification.length) verification.push(pending('Nothing executed yet', 'The reviewed extraction runs only after its approval.'));
       out.push(section('verification', 'Extraction and verification', verification));
 
+      // Contract adoption: the proposal, every difference and what supports it, the questions, the decision.
+      const ad = v.adoption;
+      const SUPPORT = { verified: 'positive', 'source-evidence': 'progress', explained: 'neutral', unknown: 'critical' };
+      out.push(section('adoption', 'Contract adoption', ad ? [
+        S.dom.MetadataList({ items: [
+          { label: 'Contract', value: ad.contract.application + ' ' + ad.contract.capability + '@' + ad.contract.version, mono: true },
+          { label: 'Capability digest', value: ad.contract.capabilityDigest, mono: true },
+          { label: 'Status', value: ad.adopted ? status({ tone: 'positive', label: 'Adopted', detail: 'by ' + ad.decision.by }) : ad.blocking.length ? status({ tone: 'critical', label: 'Blocked', detail: ad.blocking.length + ' items' }) : status({ tone: 'attention', label: 'Proposed', detail: 'awaiting approval' }) },
+          { label: 'Proposal digest', value: ad.digest, mono: true },
+          { label: 'Provider', value: ad.provider ? ad.provider.application + ' ' + ad.provider.capability + '@' + ad.provider.version : undefined, mono: true },
+          { label: 'Existing declarations', value: ad.existingDeclarations.length ? ad.existingDeclarations.map((d) => d.name + '@' + d.version + ' (' + d.relation + ')').join('; ') : 'none: the contract is new to this application' },
+        ] }),
+        ...ad.blocking.map((b) => S.dom.ErrorPanel({ title: 'Blocks adoption', message: b.message, code: b.code })),
+        table('Differences', [{ id: 'kind', header: 'Kind' }, { id: 'subject', header: 'Subject' }, { id: 'impact', header: 'Impact' }, { id: 'support', header: 'Support' }, { id: 'what', header: 'Difference and reason' }], ad.differences.map((d) => ({ key: d.id, attrs: { 'data-difference': d.id }, cells: {
+          kind: d.kind, subject: code(d.subject), impact: d.impact,
+          support: tone(d.support, SUPPORT),
+          what: [d.description, d.reason ? el('br') : null, d.reason ? el('span', { class: 'appworks-muted' }, d.reason) : null, d.behaviors.length ? el('br') : null, d.behaviors.length ? el('span', { class: 'appworks-muted' }, d.behaviors.map((b) => b.behavior + ' ' + b.status).join(', ')) : null],
+        } })), 'No differences'),
+        table('Questions', [{ id: 'id', header: 'Question' }, { id: 'impact', header: 'Impact' }, { id: 'disposition', header: 'Disposition' }, { id: 'reason', header: 'Reason' }], ad.questions.map((q) => ({ key: q.id, cells: { id: [code(q.id), ' ', q.question], impact: q.impact, disposition: tone(q.disposition, { resolved: 'positive', accepted: 'neutral', open: 'critical' }), reason: q.reason } })), 'No questions'),
+        el('p', { class: 'appworks-muted' }, 'A matching name, compatible schemas, a fulfillment claim and passing behaviors are each recorded for what they are: none of them is equivalence or authority. Adoption grants nothing and registers nothing.'),
+      ] : pending('No contract proposed', 'A verified extraction\'s contract can be proposed for adoption into the application\'s integration.')));
+
+      // The integration change: the promotion artifact, its patch and its verification.
+      const ic = v.integrationChange;
+      if (ic) {
+        const pr = ic.promotion;
+        const STATE = { proposed: 'attention', approved: 'progress', applied: 'progress', verified: 'positive', 'verification-failed': 'critical', 'ready-for-review': 'positive', 'submitted-for-review': 'positive' };
+        out.push(section('integration-change', 'Integration change', [
+          S.dom.MetadataList({ items: [
+            { label: 'State', value: tone(ic.state, STATE) },
+            { label: 'Promotion digest', value: pr.digest, mono: true },
+            { label: 'Base revision', value: pr.target.base, mono: true },
+            { label: 'Adds under', value: pr.target.directory, mono: true, hint: 'Additions only: no existing file of the application changes.' },
+            { label: 'Isolated worktree', value: ic.worktree, mono: true },
+            { label: 'Extraction', value: pr.extraction.identity.name + ' revision ' + pr.extraction.identity.revision + ' ' + pr.extraction.digest, mono: true },
+            { label: 'Patch digest', value: ic.patch ? ic.patch.digest : undefined, mono: true },
+            { label: 'Local commit', value: ic.commit ? ic.commit + ' on ' + ic.branch : undefined, mono: true, hint: ic.commit ? 'Local to the workspace. Not pushed.' : undefined },
+          ] }),
+          ...ic.reasons.map((r) => S.dom.ErrorPanel({ title: 'Recorded problem', message: r.message, code: r.code })),
+          table('Files', [{ id: 'path', header: 'Path' }, { id: 'role', header: 'Role' }, { id: 'source', header: 'Verified source' }, { id: 'digest', header: 'sha256' }], pr.target.files.map((f) => ({ key: f.path, cells: { path: code(f.path), role: f.role, source: code(f.source), digest: S.dom.ResourceIdentity({ id: f.sha256, length: 19 }) } }))),
+          pr.target.excluded.length ? table('Not promoted', [{ id: 'source', header: 'File' }, { id: 'reason', header: 'Reason' }], pr.target.excluded.map((e) => ({ key: e.source, cells: { source: code(e.source), reason: e.reason } }))) : null,
+          pr.requirements.packages.length ? table('Runtime requirements', [{ id: 'name', header: 'Package' }, { id: 'required', header: 'Verified with' }, { id: 'target', header: 'Target pins (' + pr.requirements.lockfile + ')' }, { id: 'met', header: '' }], pr.requirements.packages.map((r) => ({ key: r.name, cells: { name: code(r.name), required: r.required, target: r.target || 'absent', met: r.met ? status({ tone: 'positive', label: 'Met' }) : status({ tone: 'critical', label: 'Not met by this patch' }) } }))) : null,
+          table('Approvals this change needs', [{ id: 'action', header: 'Action' }, { id: 'supported', header: '' }, { id: 'note', header: 'What it covers' }], pr.approvals.map((x) => ({ key: x.action, cells: { action: x.action, supported: x.supported ? status({ tone: 'neutral', label: 'Supported' }) : status({ tone: 'unknown', label: 'Not supported' }), note: x.note } }))),
+          el('h3', {}, 'What runs'), el('ul', {}, pr.execution.map((e) => el('li', {}, e))),
+          ic.verification ? S.dom.EvidenceSummary({
+            id: 'promotion-evidence', title: 'Verification of the promoted copy', headingLevel: 3,
+            outcome: S.dom.VerificationBadge({ state: ic.verification.status === 'verified' ? 'verified' : 'verification_failed', checks: [{ label: 'behaviors', status: ic.verification.behaviors.passed === ic.verification.behaviors.required ? 'passed' : 'failed' }, { label: 'mutants', status: ic.verification.mutations && ic.verification.mutations.caught === ic.verification.mutations.total ? 'passed' : 'failed' }] }),
+            claims: [
+              { label: 'Required behaviors', value: ic.verification.behaviors.passed + ' of ' + ic.verification.behaviors.required + ' passed (' + ic.verification.behaviors.againstReal + ' against the real application)', verification: ic.verification.behaviors.passed === ic.verification.behaviors.required ? 'verified' : 'verification_failed', checks: [{ label: 'the extraction\'s behavioral suite, against the promoted copy', status: ic.verification.behaviors.passed === ic.verification.behaviors.required ? 'passed' : 'failed' }] },
+              { label: 'Mutants caught', value: ic.verification.mutations ? ic.verification.mutations.caught + ' of ' + ic.verification.mutations.total : 'not run', verification: ic.verification.mutations && ic.verification.mutations.total > 0 && ic.verification.mutations.caught === ic.verification.mutations.total ? 'verified' : 'verification_failed', checks: [{ label: 'mutation check, against copies of the promoted host', status: ic.verification.mutations && ic.verification.mutations.caught === ic.verification.mutations.total ? 'passed' : 'failed' }] },
+              { label: 'Subject', value: 'the extraction\'s own: ' + Object.values(pr.verification.subject).map((x) => String(x).slice(0, 19)).join(' · '), mono: true },
+              ...ic.verification.reasons.map((r) => ({ label: r.code, value: r.message })),
+            ],
+          }) : null,
+          ic.patch ? el('details', { class: 'appworks-diff' }, [el('summary', {}, 'Patch (' + ic.patch.files + ' files, ' + ic.patch.digest.slice(0, 19) + '…)'), el('pre', {}, ic.patch.diff)]) : null,
+        ], 'A deterministic promotion artifact describes the change; its lifecycle is recorded separately. Applying, committing, pushing and opening a pull request are separate actions, each with its own approval.'));
+      }
+
       out.push(section('promotion', 'Promotion', v.promotion
         ? S.dom.MetadataList({ items: [{ label: 'Status', value: v.promotion.status }, { label: 'Deployed', value: v.promotion.deployed ? 'yes' : 'no' }, { label: 'Note', value: v.promotion.note }] })
         : pending('Not ready for promotion', 'Ready for promotion means verified and still fresh. It deploys nothing, and promotion needs its own approval.')));
