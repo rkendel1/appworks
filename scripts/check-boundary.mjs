@@ -10,6 +10,9 @@
 //    and no import, path alias or project reference into a sibling AppPort checkout.
 // 4. No source imports outside its own package except through a declared package name.
 // 5. The recipe model contains no code-execution primitive: recipes are data.
+// 6. @appport/assessment depends only on @appport/protocol at run time and never on @appport/core or Distribution
+//    Protocol. Its source contains no code-execution or network primitive, and only its CLI writes a file (the
+//    assessment output): it reads the repository it assesses and nothing else.
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -36,6 +39,21 @@ else {
   const allowed = new Set(["@appport/protocol", "@appport/schema", "@appport/integration"]);
   for (const name of Object.keys({ ...recipe.manifest.dependencies, ...recipe.manifest.peerDependencies })) {
     if (!allowed.has(name)) fail(`@appport/recipe depends on ${name}; it may depend only on ${[...allowed].join(", ")}`);
+  }
+}
+
+const assessment = byName["@appport/assessment"];
+if (!assessment) fail("@appport/assessment is missing");
+else {
+  for (const name of Object.keys({ ...assessment.manifest.dependencies, ...assessment.manifest.peerDependencies })) {
+    if (name !== "@appport/protocol") fail(`@appport/assessment depends on ${name}; it may depend only on @appport/protocol`);
+  }
+  if ("@appport/core" in { ...assessment.manifest.devDependencies }) fail("@appport/assessment depends on @appport/core; it reimplements nothing of AppPort's runtime and needs none of it");
+  for (const file of walk(`${assessment.dir}/src`).filter((f) => f.endsWith(".ts"))) {
+    const text = read(file);
+    if (/\beval\s*\(|new\s+Function\s*\(|child_process|node:vm\b|\bimport\s*\(|node:(?:http|https|http2|net|tls|dgram|dns|worker_threads)\b|\bfetch\s*\(|\bWebSocket\b/.test(text)) fail(`${file} contains a code-execution or network primitive; assessment only reads`);
+    const writes = text.match(/\b(?:writeFile|appendFile|mkdir|rmdir|rm|unlink|rename|chmod|chown|symlink|link|copyFile|truncate|utimes|cp|createWriteStream|mkdtemp)(?:Sync)?\s*\(/g) ?? [];
+    if (writes.length && !file.endsWith("/src/cli.ts")) fail(`${file} writes to the filesystem (${writes.join(", ")}); only the CLI writes, and only its output file`);
   }
 }
 

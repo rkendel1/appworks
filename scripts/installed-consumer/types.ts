@@ -15,3 +15,10 @@ export const lock = (s: RecipeSource, contracts: Record<string, AppPortManifest>
 };
 export type A = RecipePackageAcceptance;
 export const a = acceptAcquiredRecipePackage;
+
+// @appport/assessment: its proposed capability shape is AppPort's own published CapabilityVersionEntry, not a copy.
+import { assessRepository, verifyAssessment, type ApplicationAssessment, type ProposedCapability } from "@appport/assessment";
+import type { CapabilityVersionEntry } from "@appport/protocol";
+export const assess: (root: string) => ApplicationAssessment = (root) => assessRepository(root);
+export const ok: (value: unknown) => boolean = (value) => verifyAssessment(value).ok;
+export const asEntry = (p: ProposedCapability): Pick<CapabilityVersionEntry, "version" | "kind" | "inputSchema" | "outputSchema" | "effect"> => p;

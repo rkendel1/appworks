@@ -9,9 +9,11 @@
     "sourceMap": false,
     "rootDir": ".",
     "paths": {
+      "@appport/assessment": ["./packages/assessment/src/index.ts"],
       "@appport/recipe": ["./packages/recipe/src/index.ts"],
       "@appport/recipe-distribution": ["./packages/recipe-distribution/src/index.ts"]
     }
   },
-  "include": ["packages/*/test/**/*.ts", "packages/*/src/**/*.ts"]
+  "include": ["packages/*/test/**/*.ts", "packages/*/src/**/*.ts"],
+  "exclude": ["packages/*/test/fixtures/**"]
 }

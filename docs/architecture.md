@@ -5,7 +5,7 @@
 | Layer | Responsibility | Where |
 |---|---|---|
 | **AppPort** | Canonical capability contracts, discovery, fulfillment validation, dependency resolution, invocation boundaries, reusable integration primitives (mapping rules, verification, schema compatibility) | `rkendel1/appport`: `@appport/protocol`, `@appport/schema`, `@appport/integration`, `@appport/core`, … |
-| **AppWorks** | Application assessment, business-capability extraction, recipe composition, versioned business packages, replacement planning; later, compilation and execution of business processes | this repository: `@appport/recipe`, `@appport/recipe-distribution` |
+| **AppWorks** | Application assessment, business-capability extraction, recipe composition, versioned business packages, replacement planning; later, compilation and execution of business processes | this repository: `@appport/assessment`, `@appport/recipe`, `@appport/recipe-distribution` |
 | **Distribution Protocol** | Independent publication, acquisition and verification of software releases | `rkendel1/distribution-protocol`: `@distribution-protocol/*` |
 | **Execution and authority infrastructure** | Authorization grants, bindings, execution control, durable state, evidence | AppPort's established layers (`@appport/core`, `@appport/authorization`); unchanged by AppWorks |
 
@@ -17,11 +17,12 @@ a package belongs to the AppPort protocol or lives in the AppPort repository.
 | | Repository | Packages | Responsibility |
 |---|---|---|---|
 | Protocol layer | `rkendel1/appport` | `@appport/protocol`, `@appport/integration`, `@appport/core`, `@appport/sdk`, … | capability protocol, discovery, fulfillment, integration |
-| Product | `rkendel1/appworks` | `@appport/recipe`, `@appport/recipe-distribution`; later, when their boundaries justify it, e.g. a compiler or assessment package | business recipes, packages, modernization |
+| Product | `rkendel1/appworks` | `@appport/assessment`, `@appport/recipe`, `@appport/recipe-distribution`; later, when its boundary justifies it, e.g. a compiler | business recipes, packages, modernization |
 | Distribution | `rkendel1/distribution-protocol` | `@distribution-protocol/*` | publication, acquisition, verification |
 
-Likewise, the recipe formats are named `appport.recipe/1`, `appport.recipe-lock/1` and `appport.recipe-package/1`, and the Distribution
-Protocol binding scheme `appport/recipe-package/1`: ecosystem names, specified and owned here (`spec/recipe-1.md`). AppPort's protocol
+Likewise, the recipe formats are named `appport.recipe/1`, `appport.recipe-lock/1` and `appport.recipe-package/1`, the Distribution
+Protocol binding scheme `appport/recipe-package/1`, and the assessment format `appport.application-assessment/1`: ecosystem names,
+specified and owned here (`spec/recipe-1.md`, `spec/assessment-1.md`). AppPort's protocol
 specification does not define them, and AppPort's packages neither implement nor read them.
 
 Each package is versioned and released independently, with its own changelog and compatibility contract. A new recipe release does not
@@ -34,8 +35,11 @@ require an AppPort release, and an AppPort release does not require an AppWorks 
             │                          └────────────→ @appport/schema ──────────→ @appport/protocol
             └──→ @distribution-protocol/protocol
 
+@appport/assessment ──→ @appport/protocol
+
 AppPort packages ──✗──→ anything in this repository
 @appport/recipe  ──✗──→ @distribution-protocol/*, any registry; @appport/core only as a devDependency (tests)
+@appport/assessment ──✗──→ @appport/core (not even for tests), @distribution-protocol/*, @appport/recipe
 ```
 
 1. **AppWorks depends on AppPort; AppPort does not depend on AppWorks.** AppWorks consumes AppPort's **published** packages at exact versions,
@@ -49,9 +53,13 @@ AppPort packages ──✗──→ anything in this repository
 4. **No code execution in the recipe model.** No `eval`, `Function`, dynamic import, `vm` or child process.
 5. **No parallel implementations.** Canonical capability identity, fulfillment validation, discovery, resolution, authorization and
    invocation are AppPort's, used through its published API (`docs/compatibility.md` §3).
+6. **Assessment only reads.** `@appport/assessment` depends on `@appport/protocol` alone, for `digestOf`, `canonicalize`, `isValidName`
+   and the `CapabilityVersionEntry`, `CapabilityEffect` and `JSONSchema` types its proposals reuse. It does not need `@appport/core`: it
+   resolves, registers, binds and invokes nothing, so a dependency on the runtime would only invite a parallel registry. Its source has no
+   code-execution or network primitive, and only its CLI writes a file: the output, never inside the assessed repository.
 
-`scripts/check-boundary.mjs` enforces 1–4 on every build (including that `@appport/core` is never a runtime or peer dependency and never
-imported by shipped source). Rule 5 is a review rule.
+`scripts/check-boundary.mjs` enforces 1–4 and 6 on every build (including that `@appport/core` is never a runtime or peer dependency and
+never imported by shipped source). Rule 5 is a review rule.
 
 ## 4. How the recipe layer uses AppPort
 
@@ -73,7 +81,15 @@ A recipe **environment** uses AppPort's runtime directly: `CanonicalContractRegi
 `CapabilityBinder` with authorization grants for bindings (`@appport/core`). AppWorks adds the recipe-level checks around them
 (`validateRecipe` with an environment, `createRecipeLock`, `checkRecipeLock`, `substituteProvider`) and nothing in their place.
 
-## 5. Authority and evidence
+## 5. How the assessment layer uses AppPort
+
+An assessment produces **proposals** in AppPort's vocabulary and nothing AppPort acts on. A proposed capability is a name that passes
+AppPort's `isValidName` and the fields of AppPort's `CapabilityVersionEntry` (`version`, `kind`, `inputSchema`, `outputSchema`,
+`effect`). It has no permissions, no fulfillment claim and no verification method; it is not a canonical contract and is registered
+nowhere. The path from a proposal to an invocable capability is AppPort's: author a contract, implement or bridge it, claim fulfillment,
+verify, resolve, and bind with a grant. The artifact's digest uses AppPort's `digestOf`, the same rule as recipe packages.
+
+## 6. Authority and evidence
 
 AppWorks introduces none. In particular:
 
@@ -81,4 +97,6 @@ AppWorks introduces none. In particular:
 * a valid Distribution Protocol signature, a trusted publisher, a matching artifact digest and a verified package binding establish that bytes
   are the package a publisher released, not that it fulfils any contract, may run, or achieved anything;
 * verification of steps and outcomes is declared in AppPort's state-verification model; the evidence a future runtime records is AppPort's
-  `VerificationEvidence`.
+  `VerificationEvidence`;
+* an assessment's evidence describes source text (observed), conclusions drawn from it (inferred) and what could not be determined
+  (unknown). It is not AppPort verification evidence, and its `scope` states that it grants nothing, verifies nothing and modified nothing.
