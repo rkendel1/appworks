@@ -21,3 +21,11 @@ body { margin: 0; background: var(--stack-color-bg-canvas); color: var(--stack-c
 .appworks-diff { margin: var(--stack-space-3) 0; }
 .appworks-diff pre { max-height: 32rem; overflow: auto; padding: var(--stack-space-3); border: var(--stack-border-width-thin) solid var(--stack-color-border-default); border-radius: var(--stack-radius-md); background: var(--stack-color-bg-surface); font-family: var(--stack-font-family-mono); font-size: var(--stack-text-sm-size); white-space: pre; }
 #agent td, #integration td { overflow-wrap: anywhere; }
+
+.appworks-summary { margin: 0 0 var(--stack-space-2); font-size: var(--stack-text-md-size); }
+.appworks-progress { width: 100%; height: 0.5rem; }
+.appworks-more { margin: var(--stack-space-2) 0; border: var(--stack-border-width-thin) solid var(--stack-color-border-default); border-radius: var(--stack-radius-md); background: var(--stack-color-bg-surface); }
+.appworks-more > summary { padding: var(--stack-space-2) var(--stack-space-3); cursor: pointer; font-weight: var(--stack-font-weight-semibold); }
+.appworks-more[open] > summary { border-bottom: var(--stack-border-width-thin) solid var(--stack-color-border-default); }
+.appworks-more > :not(summary) { margin-left: var(--stack-space-3); margin-right: var(--stack-space-3); }
+.appworks-more > :last-child { margin-bottom: var(--stack-space-3); }

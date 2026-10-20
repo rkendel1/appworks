@@ -59,6 +59,8 @@
     description ? el('p', { class: 'appworks-muted' }, description) : null,
     ...[].concat(children),
   ]);
+  // Detail stays one click away: collapsed by default, never removed.
+  const more = (title, children, open) => el('details', { class: 'appworks-more', ...(open ? { open: '' } : {}) }, [el('summary', {}, title), ...[].concat(children)]);
   const table = (label, columns, rows, empty) => S.dom.DataTable({ label, columns, rows, emptyTitle: empty || 'Nothing recorded' });
   const pending = (title, body) => S.dom.EmptyState({ title, body, headingLevel: 3 });
 
@@ -242,7 +244,7 @@
           { label: 'Limits', value: a.configured.limits.maxTurns + ' turns · ' + Math.round(a.configured.limits.decisionTimeoutMs / 1000) + 's per decision · ' + a.configured.limits.maxRetries + ' retries' },
           ...(a.configured.key ? [{ label: 'Key', value: a.configured.key.variable + (a.configured.key.set ? ' is set' : ' is NOT set') }] : []),
         ] });
-      children.push(configured);
+      children.push(more('Agent configuration', [configured, el('p', { class: 'appworks-muted' }, a.note)]));
       const c = a.current;
       const r = c && c.run;
       const buttons = [];
@@ -284,9 +286,9 @@
       if (buttons.length) children.push(el('div', { class: 'appworks-action' }, buttons));
       if (!r) {
         children.push(pending('No agent run yet', 'Running the agent carries this project through the workflow, one validated decision at a time, until a blocker or an approval only a person can grant.'));
-        return section('agent', 'Agent', children, a.note);
+        return section('agent', 'Agent', children);
       }
-      children.push(S.dom.MetadataList({ items: [
+      const runDetails = [S.dom.MetadataList({ items: [
         { label: 'Run', value: r.id, mono: true },
         { label: 'Status', value: status({ tone: AGENT[r.interrupted ? 'interrupted' : r.status] || 'unknown', label: r.interrupted ? 'interrupted' : r.status + (r.cancelRequested ? ' (stop requested)' : '') }) },
         { label: 'Agent', value: describe(r.agent) },
@@ -294,14 +296,15 @@
         ...(r.usage && r.usage.inputTokens ? [{ label: 'Tokens', value: r.usage.inputTokens + ' in · ' + r.usage.outputTokens + ' out' }] : []),
         { label: 'Started', value: when(r.startedAt) },
         ...(r.outcome ? [{ label: 'Outcome', value: r.outcome.reason + ' · project at ' + r.outcome.stage + ' (' + r.outcome.condition + ')' }] : []),
-      ] }));
+      ] })];
+      children.push(el('p', { class: 'appworks-summary' }, [status({ tone: AGENT[r.interrupted ? 'interrupted' : r.status] || 'unknown', label: r.interrupted ? 'interrupted' : r.status + (r.cancelRequested ? ' (stop requested)' : '') }), ' ' + r.turns + ' of ' + r.limits.maxTurns + ' turns' + (r.outcome ? ' · ' + r.outcome.reason : '')]));
       for (const sw of r.switches || []) children.push(el('p', { class: 'appworks-muted' }, 'Agent switched after turn ' + sw.afterTurn + ' by ' + sw.by + ': ' + describe(sw.from) + ' → ' + describe(sw.to) + '.'));
       if (r.pause && r.pause.kind === 'approval') children.push(S.dom.Unavailable({ status: 'partial', title: 'Waiting for approval: ' + r.pause.approval, reason: r.pause.action + ' needs a person\'s ' + r.pause.approval + ' approval' + (r.pause.subject ? ' of subject ' + r.pause.subject : '') + '. Approve it under Next actions, then resume the agent.' }));
       if (r.pause && r.pause.kind === 'question') children.push(S.dom.Unavailable({ status: 'partial', title: 'The agent asks', reason: r.pause.question }));
       if (r.interrupted) children.push(S.dom.Unavailable({ status: 'partial', title: 'Interrupted', reason: 'The worker carrying this run stopped renewing its lease. Resuming reconciles the last action from the workflow\'s records; nothing is repeated blindly.' }));
       if (r.error) children.push(S.dom.ErrorPanel({ title: 'The agent run failed', message: r.error.message, code: r.error.code }));
       for (const b of (r.outcome && r.outcome.blockers) || []) children.push(S.dom.Unavailable({ status: 'partial', title: 'Blocker (reported by the agent)', reason: b }));
-      children.push(table('Agent turns', [{ id: 'turn', header: '#' }, { id: 'status', header: 'Status' }, { id: 'decision', header: 'Decision' }, { id: 'rationale', header: 'Agent\'s rationale (not evidence)' }, { id: 'result', header: 'Recorded result' }], c.turns.slice().reverse().map((t) => {
+      runDetails.push(table('Agent turns', [{ id: 'turn', header: '#' }, { id: 'status', header: 'Status' }, { id: 'decision', header: 'Decision' }, { id: 'rationale', header: 'Agent\'s rationale (not evidence)' }, { id: 'result', header: 'Recorded result' }], c.turns.slice().reverse().map((t) => {
         const d = t.decision;
         const what = !d ? '(no readable decision)' : d.kind === 'action' ? d.action + (Object.keys(d.arguments || {}).length ? ' ' + JSON.stringify(d.arguments) : '') : d.kind === 'ask' ? 'ask: ' + d.question : 'finish: ' + d.outcome;
         return { key: t.id, cells: {
@@ -309,7 +312,8 @@
           result: t.result ? [t.result.summary + (t.result.class && t.result.class !== 'none' ? ' (' + t.result.class + ')' : ''), ...(t.result.evidence || []).map((e) => [' ', code(e)])] : (t.problems || []).map((p) => p.code + ': ' + p.message).join('; '),
         } };
       }), 'No turns yet'));
-      return section('agent', 'Agent', children, a.note);
+      children.push(more('Run details and every decision', runDetails));
+      return section('agent', 'Agent', children);
     }
 
     function render(v, agent) {
@@ -324,14 +328,19 @@
         meta: [S.dom.ResourceIdentity({ kind: 'project', id: p.id, length: 24 }), ' ', rev ? S.dom.ResourceIdentity({ kind: 'commit', id: rev.sha }) : null],
       }));
 
-      out.push(el('div', { class: 'appworks-action' }, [S.dom.Button({ label: 'Delete project', variant: 'ghost', attrs: { 'data-action': 'delete' }, onClick: () => deleteProject(p) })]));
 
-      // Workflow stages, in the order feltdb.flow declares them.
-      out.push(section('workflow', 'Workflow', el('ol', { class: 'appworks-stages' }, v.stages.map((s) => el('li', { class: 'appworks-stage appworks-stage--' + s.state, 'data-stage': s.stage, ...(s.state === 'current' ? { 'aria-current': 'step' } : {}) }, [
+      // Progress at a glance; every stage is one click away.
+      const done = v.stages.filter((x) => x.state === 'done').length;
+      const current = v.stages.find((x) => x.state === 'current' || x.state === 'failed');
+      out.push(el('section', { id: 'progress', 'aria-label': 'Progress' }, [
+        el('p', { class: 'appworks-summary' }, 'Step ' + Math.min(done + 1, v.stages.length) + ' of ' + v.stages.length + (current ? ' · ' + current.stage : '')),
+        el('progress', { class: 'appworks-progress', max: String(v.stages.length), value: String(done), 'aria-label': 'Workflow progress' }),
+      ]));
+      const stageList = [el('ol', { class: 'appworks-stages' }, v.stages.map((s) => el('li', { class: 'appworks-stage appworks-stage--' + s.state, 'data-stage': s.stage, ...(s.state === 'current' ? { 'aria-current': 'step' } : {}) }, [
         el('span', { class: 'appworks-stage__mark', 'aria-hidden': 'true' }, s.state === 'done' ? '✓' : s.state === 'current' ? '●' : s.state === 'failed' ? '✕' : '○'),
         el('span', {}, s.stage),
         el('span', { class: 'stack-visually-hidden' }, ' (' + s.state + ')'),
-      ]))), 'Stages and transitions come from the workspace\'s feltdb.flow. Every transition is checked against recorded evidence.'));
+      ]))), el('p', { class: 'appworks-muted' }, 'Stages and transitions come from the workspace\'s feltdb.flow. Every transition is checked against recorded evidence.')];
 
       const notices = [];
       if (p.failure) notices.push(S.dom.ErrorPanel({ title: p.failure.step + ' failed', message: p.failure.message, code: p.failure.code }));
@@ -350,7 +359,6 @@
             el('span', { class: 'appworks-muted' }, ' ' + n.reason + (n.approval ? ' Requires approval: ' + n.approval + '.' : '')),
           ])))
           : null,
-        el('p', { class: 'appworks-muted' }, v.next.note),
       ]));
 
       out.push(renderAgent(agent));
@@ -580,7 +588,22 @@
       out.push(section('history', 'History', table('Stage history', [{ id: 'seq', header: '#' }, { id: 'step', header: 'Step' }, { id: 'to', header: 'Stage' }, { id: 'condition', header: 'Condition' }, { id: 'actor', header: 'Actor' }, { id: 'at', header: 'At' }, { id: 'note', header: 'Note' }], v.history.map((h) => ({ key: String(h.sequence), cells: {
         seq: String(h.sequence), step: h.step, to: h.from && h.from !== h.to ? h.from + ' → ' + h.to : h.to, condition: h.condition, actor: h.actor, at: when(h.at), note: h.note,
       } })))));
-      return out;
+      // Primary: header, progress, anything that needs attention, the next step and the agent. The rest is detail.
+      const PRIMARY = new Set(['progress', 'condition', 'next', 'agent']);
+      const primary = [out[0]];
+      const detail = [];
+      for (const node of out.slice(1)) {
+        if (node && PRIMARY.has(node.id)) primary.push(node);
+        else if (node && node.tagName === 'SECTION') detail.push(more(node.querySelector('h2') ? node.querySelector('h2').textContent : node.id, [...node.childNodes].filter((c) => c.tagName !== 'H2')));
+      }
+      primary.push(el('section', { id: 'details', 'aria-labelledby': 'details-title' }, [
+        el('h2', { id: 'details-title' }, 'Details'),
+        el('p', { class: 'appworks-muted' }, 'Everything AppWorks recorded about this project. ' + v.next.note),
+        more('All workflow stages', stageList),
+        ...detail,
+        el('div', { class: 'appworks-action' }, [S.dom.Button({ label: 'Delete project', variant: 'ghost', attrs: { 'data-action': 'delete' }, onClick: () => deleteProject(p) })]),
+      ]));
+      return primary;
     }
 
     await refresh();
