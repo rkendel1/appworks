@@ -1,10 +1,9 @@
 // The AppPort integration of {{REPOSITORY}}, added by AppWorks. It publishes AppPort discovery for the
-// application; capabilities are added here as they are extracted, each with its contract, adapter and verification.
+// application and the capabilities proposed for it (capabilities.mjs), each backed by cited evidence in the source.
 // It listens on loopback only. APPPORT_PORT overrides the port (0 picks a free one).
 import { createApplication, createServer, permissionAuthorizer } from "@appport/sdk";
 import { serve } from "@appport/sdk/node";
-
-export const capabilities = [];
+import { capabilities } from "./capabilities.mjs";
 
 const application = createApplication({
   application: {{APPLICATION}},

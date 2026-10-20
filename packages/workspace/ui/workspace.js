@@ -411,6 +411,7 @@
         { label: 'Proposal', value: inst.digest, mono: true },
         ...(inst.install ? [{ label: 'Worktree', value: inst.install.worktree, mono: true }, { label: 'Checked', value: inst.install.verified ? 'serves AppPort discovery' + (inst.install.discovery && inst.install.discovery.state ? ' (' + inst.install.discovery.state + ')' : '') : 'not verified' }] : []),
       ] }), el('p', { class: 'appworks-muted' }, inst.description),
+      table('Capabilities the integration publishes', [{ id: 'name', header: 'Capability' }, { id: 'route', header: 'Calls' }, { id: 'source', header: 'Found by' }, { id: 'evidence', header: 'Evidence' }], (inst.capabilities || []).map((c) => ({ key: c.name, cells: { name: code(c.name), route: code(c.method + ' ' + c.path), source: c.source === 'agent' ? 'agent (cited)' : 'route scan', evidence: c.evidence.map((e) => e.path + ':' + e.line).join(', ') } })), 'None found: the source registers no route a scan can see, and none was proposed'),
       table('Files to add', [{ id: 'path', header: 'File' }, { id: 'role', header: 'Role' }, { id: 'sha', header: 'SHA-256' }], inst.files.map((f) => ({ key: f.path, cells: { path: code(f.path), role: f.role, sha: code(f.sha256.slice(0, 19) + '…') } }))),
       inst.install ? el('details', { class: 'appworks-diff' }, [el('summary', {}, 'Patch'), el('pre', {}, inst.install.patch)]) : null] : [];
       out.push(section('integration', 'AppPort integration', [...integration, ...installation, el('h3', {}, 'Discovery'), ...discovery]));

@@ -30,6 +30,7 @@ import { buildPromotion, patchDigest, promotionProblems, readPromotionPlan, work
 import { reconcile, type ExtractionBinding, type InventoryRecord, type MatchDecision } from "./reconcile.js";
 import { acquireCheckout, commitInfo, commitWorktree, createPromotionWorktree, worktreePatch, worktreeState, type RepositoryProvider } from "./repository.js";
 import { directoryDigest, installPackages, listExtractions, runExtraction, runPromotionVerification, startIntegration, type ExtractionEntry, type RunnerResult } from "./runner.js";
+import { mergeProposals, routeProposals, verifyProposals } from "./surface.js";
 import { proposeInstallation, type AppPortInstallation } from "./install.js";
 import { sha256, Store, type Collection, type Write } from "./store.js";
 
@@ -462,16 +463,20 @@ export class Workspace {
    * Proposes installing AppPort in a revision that has none: an AppPort application of its own in a new directory
    * (`install.ts`). Nothing is written; the proposal's digest is what the `modify-integration` approval covers.
    */
-  proposeIntegration(principal: Principal, id: string, resuming = false): Promise<Started> {
+  proposeIntegration(principal: Principal, id: string, input: { capabilities?: unknown } = {}, resuming = false): Promise<Started> {
     const guard = async (p: Project) => {
       const integration = await this.body<IntegrationRecord>(p.current.integration, "integration inspection");
       if (integration.body.status === "present") throw new WorkspaceError("INTEGRATION_PRESENT", `the revision already has an AppPort integration (${integration.body.integrations.map((i) => i.root).join(", ") || "configuration"}); discover it instead`);
     };
-    return this.begin(principal, id, "propose-integration", { stage: startsFrom("propose-integration"), resuming, guard }, async ({ project: p, run }) => {
+    return this.begin(principal, id, "propose-integration", { stage: startsFrom("propose-integration"), input: input as Record<string, unknown>, resuming, guard }, async ({ project: p, run }) => {
       const checkout = this.assertRevision(p);
-      const proposal = proposeInstallation({ owner: p.repository.owner, name: p.repository.name, url: p.repository.url, revision: p.revision!.sha, checkout });
-      const { record, writes } = await this.existingOrWrite(p, "integration-proposal", proposal, run, { digest: proposal.digest, format: proposal.format, summary: { directory: proposal.directory, application: proposal.application.id, files: proposal.files.length } });
-      return { writes, current: { integrationProposal: record.id }, evidence: [record.id, proposal.digest], note: `proposed installing AppPort as ${proposal.application.id} under ${proposal.directory}/ (${proposal.files.length} files, ${proposal.digest}); nothing written` };
+      // What the application could publish: the routes its source registers, plus what an agent proposes from the docs
+      // and code, each citation checked against the pinned files. Both are part of the proposal a person approves.
+      const scanned = routeProposals(checkout).proposals;
+      const capabilities = mergeProposals(scanned, input.capabilities === undefined ? [] : verifyProposals(checkout, input.capabilities));
+      const proposal = proposeInstallation({ owner: p.repository.owner, name: p.repository.name, url: p.repository.url, revision: p.revision!.sha, checkout, capabilities });
+      const { record, writes } = await this.existingOrWrite(p, "integration-proposal", proposal, run, { digest: proposal.digest, format: proposal.format, summary: { directory: proposal.directory, application: proposal.application.id, files: proposal.files.length, capabilities: capabilities.length } });
+      return { writes, current: { integrationProposal: record.id }, evidence: [record.id, proposal.digest], note: `proposed installing AppPort as ${proposal.application.id} under ${proposal.directory}/ (${proposal.files.length} files, ${capabilities.length} capabilities, ${proposal.digest}); nothing written` };
     });
   }
 
@@ -485,7 +490,7 @@ export class Workspace {
     const action = STEPS["install-integration"]!.approval!;
     const proposalOf = async (p: Project) => {
       const proposal = await this.body<AppPortInstallation>(p.current.integrationProposal, "AppPort installation proposal");
-      const again = proposeInstallation({ owner: p.repository.owner, name: p.repository.name, url: p.repository.url, revision: p.revision!.sha, checkout: this.assertRevision(p) });
+      const again = proposeInstallation({ owner: p.repository.owner, name: p.repository.name, url: p.repository.url, revision: p.revision!.sha, checkout: this.assertRevision(p), capabilities: proposal.body.capabilities });
       if (again.digest !== proposal.body.digest) throw new WorkspaceError("PROPOSAL_STALE", `the installation proposal ${proposal.body.digest} is no longer what the pinned revision gives (${again.digest}); propose it again`);
       return proposal;
     };
@@ -979,7 +984,7 @@ export class Workspace {
       case "inspect":
         return this.inspect(principal, id, resuming);
       case "propose-integration":
-        return this.proposeIntegration(principal, id, resuming);
+        return this.proposeIntegration(principal, id, input.capabilities === undefined ? {} : { capabilities: input.capabilities }, resuming);
       case "install-integration":
         return this.installIntegration(principal, id, resuming);
       case "discover":

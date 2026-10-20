@@ -82,7 +82,7 @@ const DESCRIPTION: Record<string, string> = {
   acquire: "Resolve the project's ref to one commit through its repository provider and fetch exactly that commit into an isolated checkout. Nothing runs.",
   pin: "Confirm the checkout's HEAD is the resolved commit and record its content hash.",
   inspect: "Look for an existing AppPort integration in the pinned files. Static; nothing runs.",
-  "propose-integration": "Propose installing AppPort in a revision that has no AppPort integration: an AppPort application of its own in a new directory, publishing discovery. Nothing is written.",
+  "propose-integration": "Propose installing AppPort in a revision that has no AppPort integration: an AppPort application of its own in a new directory, publishing the application's capabilities (each a call to one HTTP route of the running application). Routes the source registers are found automatically. Before proposing, read the README, docs and entry points (read actions) and pass `capabilities` for what the application offers that a route scan cannot see (a catch-all proxy, routes built at run time), each citing a file, line and verbatim text. Propose only what the source or docs support. Nothing is written.",
   "install-integration": "Install the proposed AppPort integration in an isolated worktree of the pinned revision: write exactly the proposed files, install its pinned packages with lifecycle scripts disabled, start it on loopback and check it serves AppPort discovery. Needs the modify-integration approval of the proposal, granted by a person.",
   discover: "Ask a running instance of the application what it advertises, through AppPort's client. Without an endpoint, the ports the pinned source names are probed on loopback (an integration AppWorks installed is started for the discovery and stopped after it); if nothing answers, discovery is recorded as unavailable with every origin tried.",
   assess: "Statically assess the pinned revision: candidate capabilities, readiness, questions. Nothing runs.",
@@ -109,8 +109,38 @@ function stepInput(step: string, view: ProjectView): Record<string, unknown> {
     const ids = (view.inventory?.candidates ?? []).map((c) => c.id);
     return { type: "object", properties: { candidate: { type: "string", ...(ids.length ? { enum: ids.slice(0, 200) } : {}), description: "an assessed candidate id" }, rationale: { type: "string", minLength: 1, maxLength: 2000 } }, required: ["candidate", "rationale"], additionalProperties: false };
   }
+  if (step === "propose-integration") return PROPOSE_INTEGRATION_INPUT;
   return NO_INPUT;
 }
+
+const PROPOSE_INTEGRATION_INPUT = {
+  type: "object",
+  properties: {
+    capabilities: {
+      type: "array",
+      maxItems: 50,
+      description: "Capabilities this application offers over HTTP that the route scan could not see (for example a catch-all proxy whose real endpoints are named in the README). Each calls one route of the running application. Only propose what the pinned source or docs support.",
+      items: {
+        type: "object",
+        properties: {
+          name: { type: "string", pattern: "^[a-z][a-z0-9]*(\\.[a-z][a-z0-9]*)+$", description: "<namespace>.<operation> in lower-case letters and digits, e.g. chat.createcompletion" },
+          method: { enum: ["GET", "POST", "PUT", "PATCH", "DELETE"] },
+          path: { type: "string", description: "the application's HTTP path, e.g. /v1/models; {param} marks a path parameter" },
+          description: { type: "string", minLength: 1, maxLength: 400 },
+          evidence: {
+            type: "array",
+            minItems: 1,
+            maxItems: 5,
+            items: { type: "object", properties: { path: { type: "string", description: "file in the repository" }, line: { type: "integer", minimum: 1 }, quote: { type: "string", minLength: 1, maxLength: 200, description: "text that appears on that line, verbatim" } }, required: ["path", "line", "quote"], additionalProperties: false }
+          }
+        },
+        required: ["name", "method", "path", "description", "evidence"],
+        additionalProperties: false
+      }
+    }
+  },
+  additionalProperties: false
+};
 
 function workflowAction(step: string): ActionDefinition {
   const approval = step === "commit" ? "commit" : STEPS[step]?.approval;
@@ -136,7 +166,7 @@ function workflowAction(step: string): ActionDefinition {
     },
     async execute(ctx, args) {
       const before = { ...ctx.project.current };
-      const input = step === "select" ? { candidate: String(args.candidate), rationale: `agent-proposed: ${String(args.rationale)}` } : step === "discover" && typeof args.endpoint === "string" ? { endpoint: args.endpoint } : {};
+      const input = step === "propose-integration" && Array.isArray(args.capabilities) ? { capabilities: args.capabilities } : step === "select" ? { candidate: String(args.candidate), rationale: `agent-proposed: ${String(args.rationale)}` } : step === "discover" && typeof args.endpoint === "string" ? { endpoint: args.endpoint } : {};
       let started;
       try {
         started = step === "resume" ? await ctx.ws.resume(ctx.principal, ctx.project.id) : await ctx.ws.dispatch(ctx.principal, ctx.project.id, step, input);

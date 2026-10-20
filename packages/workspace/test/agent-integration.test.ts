@@ -171,7 +171,7 @@ describe("installing AppPort in a revision that has none", () => {
       const checkout = ws.store.resolve(p.revision!.checkout);
       expect(proposal).toMatchObject({ directory: "appport", application: { id: "com.github.example.notes" }, packages: { "@appport/sdk": APPPORT_SDK_VERSION } });
       expect(proposeInstallation({ owner: "example", name: "notes", url: "https://github.com/example/notes", revision: p.revision!.sha, checkout }).digest).toBe(proposal.digest);
-      expect(proposal.files.map((f) => f.path)).toEqual(["appport/package.json", "appport/server.mjs", "appport/.env.example", "appport/.gitignore", "appport/README.md"]);
+      expect(proposal.files.map((f) => f.path)).toEqual(["appport/package.json", "appport/server.mjs", "appport/capabilities.mjs", "appport/.env.example", "appport/.gitignore", "appport/README.md"]);
       // Not approved: refused before anything is written.
       await expect(ws.dispatch(OPERATOR, id, "install-integration", {})).rejects.toMatchObject({ code: "APPROVAL_REQUIRED" });
       const { subject } = await ws.approvalSubject(OPERATOR, id, "modify-integration");

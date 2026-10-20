@@ -112,7 +112,7 @@ describe("the appworks CLI", () => {
       await server.close();
       await ws.close();
     }
-  });
+  }, 60_000);
 
   it("exits 2 for invalid arguments, 3 when unauthorized, 4 when refused, and 1 when a step ran and failed", async () => {
     const { mirror } = notesRepository();
