@@ -124,16 +124,18 @@ const workspace = byName["@appport/workspace"];
 if (workspace) {
   const allowed = new Set(["@appport/assessment", "@appport/extraction", "@appport/protocol", "@appport/client", "@appport/github", "@feltdb/core", "@appport/schema", "@anthropic-ai/sdk", "openai"]);
   const providerSdks = { "@anthropic-ai/sdk": "/src/agent/providers/anthropic.ts", openai: "/src/agent/providers/openai.ts" };
-  // The `recipe` command is delegated to the recipe runtime's CLI by a lazy import; the workspace has no hard dependency on it.
-  const delegated = "@appport/recipe-runtime";
-  if (delegated in { ...workspace.manifest.dependencies }) fail(`@appport/workspace depends on ${delegated}; it may only reach it through an optional peer dependency (the \`recipe\` command)`);
-  if (delegated in { ...workspace.manifest.peerDependencies } && workspace.manifest.peerDependenciesMeta?.[delegated]?.optional !== true) fail(`@appport/workspace's peer dependency ${delegated} must be optional`);
+  // The `recipe` and `package` commands are delegated to other packages' CLIs by a lazy import; the workspace has no hard dependency on them.
+  const delegates = ["@appport/recipe-runtime", "@appport/recipe-distribution"];
+  for (const delegated of delegates) {
+    if (delegated in { ...workspace.manifest.dependencies }) fail(`@appport/workspace depends on ${delegated}; it may only reach it through an optional peer dependency (a delegated command)`);
+    if (delegated in { ...workspace.manifest.peerDependencies } && workspace.manifest.peerDependenciesMeta?.[delegated]?.optional !== true) fail(`@appport/workspace's peer dependency ${delegated} must be optional`);
+  }
   for (const [name, spec] of Object.entries({ ...workspace.manifest.dependencies, ...workspace.manifest.peerDependencies })) {
-    if (name === delegated) continue;
+    if (delegates.includes(name)) continue;
     if (!allowed.has(name)) fail(`@appport/workspace depends on ${name}; it may depend only on ${[...allowed].join(", ")}`);
     if (!byName[name] && !/^\d+\.\d+\.\d+$/.test(spec)) fail(`@appport/workspace depends on ${name}@${spec}; published dependencies are exact versions`);
   }
-  for (const name of Object.keys({ ...workspace.manifest.devDependencies })) if (name !== "@appport/sdk" && name !== delegated) fail(`@appport/workspace has devDependency ${name}; only @appport/sdk (a real application for discovery tests) and ${delegated} (the delegated \`recipe\` command) are allowed`);
+  for (const name of Object.keys({ ...workspace.manifest.devDependencies })) if (name !== "@appport/sdk" && !delegates.includes(name)) fail(`@appport/workspace has devDependency ${name}; only @appport/sdk (a real application for discovery tests) and the delegated command packages (${delegates.join(", ")}) are allowed`);
   if (workspace.manifest.private !== true) fail("@appport/workspace must be private: it is an application, and @appport/github brings a second AppPort stack a published library must not");
   if (!workspace.manifest.files?.includes("feltdb.flow")) fail("@appport/workspace must ship its feltdb.flow");
   try {

@@ -22,6 +22,8 @@ export interface RecipeRunRecord {
   /** `{ input, steps: { <id>: { output } } }`, the data recipe pointers address. */
   data: { input: JsonValue; steps: Record<string, { output: JsonValue }> };
   output?: JsonValue;
+  /** Where the recipe came from when it was not handed over directly: the installed package and release (spec/distribution-1.md §6). */
+  origin?: JsonValue;
   owner?: string;
   leaseExpiresAt?: string;
   events: number;

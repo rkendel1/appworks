@@ -384,6 +384,9 @@ decisions, made by the receiving environment under its own authority.
   digest; `verifyArtifactBytes` and size; `loadRecipePackage` with the signed binding value. The result is `installable` only when publisher
   trust was evaluated and accepted, and is never `executable`.
 
+Publishing, acquisition (with receipts) and installation over a file channel are specified in `spec/distribution-1.md` and implemented in the
+same package; they add no dependency and change nothing above.
+
 **Observed in the published 1.0.0 API.** `validateManifest` does not enforce the interface `type` enum that Distribution Protocol's own
 `manifest.schema.json` declares (it accepts `"type": "recipe"`). The adapter does not compensate; the discrepancy belongs to the
 Distribution Protocol repository.

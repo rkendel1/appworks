@@ -27,7 +27,7 @@ This first slice executes the vertical path the supplier-invoice recipe needs. �
 
 | Collection | One record per | Notes |
 |---|---|---|
-| `RecipeRun` | run | the exact recipe (`recipe`, `recipeDigest`), the input, the principal, `status`, `outcome`, `currentStep`, step outputs (`data`), lease (`owner`, `leaseExpiresAt`), event counter |
+| `RecipeRun` | run | the exact recipe (`recipe`, `recipeDigest`), its `origin` when it came from an installed package (`spec/distribution-1.md` §6), the input, the principal, `status`, `outcome`, `currentStep`, step outputs (`data`), lease (`owner`, `leaseExpiresAt`), event counter |
 | `StepAttempt` | step execution (`<run>.<step>`) | `started` → `completed` / `waiting`; the edge taken and the next step |
 | `Invocation` | capability call (`<run>.<step>.<n>`) | purpose `step`, `verification` or `reconciliation`; idempotency key; input digest; `prepared` → `intent` → `succeeded` / `failed` / `uncertain` / `abandoned`; resolved provider; error |
 | `Verification` | verification of one method | step or `outcome`; method id and source (`contract`, `recipe`, `outcome`); `confirmed` / `contradicted` / `inconclusive`; each expectation with expected and actual |

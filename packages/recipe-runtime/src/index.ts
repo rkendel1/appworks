@@ -11,4 +11,5 @@ export * from "./gateway.js";
 export * from "./appport-gateway.js";
 export * from "./engine.js";
 export { applyRules } from "./rules.js";
+export { loadInstalledRecipe, type InstalledRecipe } from "./installed.js";
 export { unsupportedConstructs } from "./support.js";

@@ -179,15 +179,14 @@ describe("human tasks are durable and their transitions are checked (§9)", () =
   }, T);
 });
 
-describe("a runtime home created by the first release opens under this flow (additive change)", () => {
-  it("deploys the widened flow over the previous one without destroying anything", async () => {
-    const { createFeltDB, deployFlowSpec: _unused, parseFlowSpec } = (await import("@feltdb/core")) as unknown as { createFeltDB: typeof import("@feltdb/core").createFeltDB; deployFlowSpec?: unknown; parseFlowSpec: typeof import("@feltdb/core").parseFlowSpec };
-    const { readFileSync } = await import("node:fs");
-    const { mkdirSync } = await import("node:fs");
+describe("a runtime home created by an earlier release opens under this flow (additive changes only)", () => {
+  it.each(["feltdb.flow.v1", "feltdb.flow.v2"])("deploys the current flow over %s without destroying anything, and runs", async (fixture) => {
+    const { createFeltDB, parseFlowSpec } = (await import("@feltdb/core")) as unknown as { createFeltDB: typeof import("@feltdb/core").createFeltDB; parseFlowSpec: typeof import("@feltdb/core").parseFlowSpec };
+    const { readFileSync, mkdirSync } = await import("node:fs");
     const dir = tempDir();
     mkdirSync(join(dir, "runtime", "state"), { recursive: true });
     const old = createFeltDB({ namespace: "appworks-recipe-runtime", mode: "local", path: join(dir, "runtime", "state") });
-    await old.deployFlowSpec(parseFlowSpec(readFileSync(new URL("./fixtures/feltdb.flow.v1", import.meta.url), "utf8")), 0);
+    await old.deployFlowSpec(parseFlowSpec(readFileSync(new URL(`./fixtures/${fixture}`, import.meta.url), "utf8")), 0);
     await old.close();
 
     const env = await accountingEnvironment(join(dir, "env"), supplierInvoice());

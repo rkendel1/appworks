@@ -4,6 +4,7 @@
  * place that says where providers are and which grants exist. A recipe names none of that.
  *
  *   appworks recipe run <recipe.json> --input <json|@file> --environment <module> [--principal <name>] [--home <dir>] [--json]
+ *   appworks recipe run --package <installed-dir> --input <json|@file> --environment <module> ...      (from an installed package)
  *   appworks recipe status <run> [--home <dir>] [--json]
  *   appworks recipe resume <run> --environment <module> [--home <dir>] [--json]
  *   appworks recipe reconcile <run> --environment <module> [--principal <name>] [--home <dir>] [--json]
@@ -21,6 +22,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { permissiveAuthority, unavailableGateway, type CapabilityGateway, type RuntimeAuthority } from "./gateway.js";
 import { RecipeRuntime, type RunView } from "./engine.js";
 import { RuntimeError } from "./model.js";
+import { loadInstalledRecipe } from "./installed.js";
 
 export interface LoadedEnvironment {
   gateway: CapabilityGateway;
@@ -41,6 +43,7 @@ export interface CliEnvironment {
 
 const USAGE = `usage:
   appworks recipe run <recipe.json> --input <json|@file> --environment <module> [--principal <name>] [--home <dir>] [--json]
+  appworks recipe run --package <installed-dir> --input <json|@file> --environment <module> [--principal <name>] [--home <dir>] [--json]
   appworks recipe status <run> [--home <dir>] [--json]
   appworks recipe resume <run> --environment <module> [--home <dir>] [--json]
   appworks recipe reconcile <run> --environment <module> [--principal <name>] [--home <dir>] [--json]
@@ -77,6 +80,7 @@ async function defaultLoad(modulePath: string, context: { home: string }): Promi
 
 function describe(run: RunView): string[] {
   const lines = [`run ${run.id}: ${run.status}${run.outcome ? ` / ${run.outcome}` : ""}${run.interrupted ? " (interrupted: its worker's lease expired; resume takes it over)" : ""}`, `  recipe: ${run.recipeId} ${run.recipeDigest}`];
+  if (run.origin) lines.push(`  origin: ${JSON.stringify(run.origin)}`);
   lines.push(`  assessment: ${run.assessment.state} - ${run.assessment.summary}`);
   for (const e of run.assessment.evidence.filter((x) => x.result !== "confirmed")) lines.push(`    ${e.stepId}/${e.methodId} (${e.source}): ${e.result}${e.reason ? ` - ${e.reason}` : ""}`);
   if (run.assessment.next) lines.push(`  next: ${run.assessment.next}`);
@@ -103,7 +107,7 @@ export async function main(argv: string[], io: CliIO = { out: (t) => process.std
     return 2;
   }
   const { positional, options } = parse(rest);
-  const target = positional[0];
+  const target = positional[0] ?? (command === "run" && typeof options["package"] === "string" ? "(installed package)" : undefined);
   if (!target) {
     io.err(USAGE);
     return 2;
@@ -122,14 +126,16 @@ export async function main(argv: string[], io: CliIO = { out: (t) => process.std
     runtime = await RecipeRuntime.open({ home, gateway: loaded?.gateway ?? unavailableGateway, authority: loaded?.authority ?? permissiveAuthority, ...(environment.now ? { now: environment.now } : {}) });
     let run: RunView;
     if (command === "run") {
-      const recipe = JSON.parse(readFileSync(resolve(target), "utf8")) as unknown;
+      // From an installed package the recipe is the package's own, re-verified now; never a file the operator could have edited since.
+      const installed = typeof options["package"] === "string" ? loadInstalledRecipe(resolve(options["package"])) : undefined;
+      const recipe = installed ? installed.recipe : (JSON.parse(readFileSync(resolve(target), "utf8")) as unknown);
       const raw = options["input"];
       if (typeof raw !== "string") {
         io.err("--input <json|@file> is required");
         return 2;
       }
       const input = JSON.parse(raw.startsWith("@") ? readFileSync(resolve(raw.slice(1)), "utf8") : raw) as unknown;
-      run = await runtime.start(recipe, input, principalOf(options));
+      run = await runtime.start(recipe, input, principalOf(options), installed ? { origin: installed.origin } : {});
     } else if (command === "resume") run = await runtime.resume(target);
     else if (command === "reconcile") run = await runtime.reconcile(target, principalOf(options));
     else if (command === "answer" || command === "expire") {

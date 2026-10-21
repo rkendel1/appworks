@@ -88,7 +88,7 @@ anything else      ──✗──→ @appport/workspace
    `@appport/workspace`, assessment, extraction or distribution. It is the one package allowed to use `@appport/core` at run time,
    because resolution, authorization binding and invocation are core's and are called afresh for every invocation (`spec/runtime-1.md`
    §6-§7). Its durable state is its own `feltdb.flow` in FeltDB, opened in `src/store.ts` only. It starts no process, server or
-   connection. The workspace reaches its CLI only by a lazy import through an optional peer dependency (the `recipe` command), and shares
+   connection. The workspace reaches its CLI only by a lazy import through an optional peer dependency (the `recipe` command, and `package` for `@appport/recipe-distribution`), and shares
    no state with it.
 
 `scripts/check-boundary.mjs` enforces 1–4, 6, 7, 8 and 9 on every build (including that `@appport/core` is a runtime dependency of `@appport/recipe-runtime` only,

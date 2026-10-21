@@ -71,6 +71,8 @@ export interface RunView {
   id: string;
   recipeId: string;
   recipeDigest: string;
+  /** The installed package this run executes, if it came from one. */
+  origin?: JsonValue;
   status: RecipeRunRecord["status"];
   outcome?: RunOutcome;
   endStep?: string;
@@ -151,7 +153,7 @@ export class RecipeRuntime {
   // ------------------------------------------------------------------------------------------------ public API
 
   /** Starts a run (spec §4). A recipe that does not validate here, or an input that does not match, writes nothing. */
-  async start(recipeSource: unknown, input: unknown, principal: string): Promise<RunView> {
+  async start(recipeSource: unknown, input: unknown, principal: string, options: { origin?: JsonValue } = {}): Promise<RunView> {
     const id = (recipeSource as { id?: unknown } | null)?.id;
     if (!(await this.authority.canStart(principal, typeof id === "string" ? id : ""))) throw new RuntimeError("AUTHORITY_DENIED", `${principal} may not start ${String(id)}`);
     const shape = validateRecipe(recipeSource);
@@ -176,6 +178,7 @@ export class RecipeRuntime {
       status: "running",
       currentStep: recipe.start,
       data: { input: input as JsonValue, steps: {} },
+      ...(options.origin !== undefined ? { origin: options.origin } : {}),
       owner: this.claim(runId),
       leaseExpiresAt: this.lease(),
       events: 1,
@@ -842,7 +845,7 @@ export class RecipeRuntime {
     const events = (await this.store.list<RunEventRow>("RunEvent", { runId })).filter((e) => e.type === "verification.recovery").length;
     const [steps, invocations, verifications, tasks, reconciliations] = await Promise.all([by<StepAttemptRecord>("StepAttempt"), by<InvocationRecord>("Invocation"), by<VerificationRecord>("Verification"), by<HumanTaskRecord>("HumanTask"), this.store.list<ReconciliationRecord>("Reconciliation", { runId }).then(sorted)]);
     return {
-      id: run.id, recipeId: run.recipeId, recipeDigest: run.recipeDigest, status: run.status,
+      id: run.id, recipeId: run.recipeId, recipeDigest: run.recipeDigest, ...(run.origin !== undefined ? { origin: run.origin } : {}), status: run.status,
       ...(run.outcome ? { outcome: run.outcome } : {}), ...(run.endStep ? { endStep: run.endStep } : {}), ...(run.reason ? { reason: run.reason } : {}),
       assessment: this.assess(run, invocations, verifications, events),
       currentStep: run.currentStep, ...(run.output !== undefined ? { output: run.output } : {}), principal: run.principal,

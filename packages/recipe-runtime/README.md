@@ -11,6 +11,9 @@ appworks recipe answer <run> <step> --response '{"decision":"approved"}' --envir
 appworks recipe expire <run> <step> --environment ./my-environment.mjs
 ```
 
+Run an installed package instead of a file with `appworks recipe run --package <installed-dir> …`: the package is re-verified against the digest
+recorded at install every time, and the run records the package and release as its `origin` (`spec/distribution-1.md` §6).
+
 The environment module default-exports `({ home }) => ({ gateway, authority?, close? })`. The gateway (`createAppPortGateway`) reaches
 capabilities only through `@appport/core`: each invocation is resolved, authorized from durable grants and invoked afresh. A recipe names
 no provider.

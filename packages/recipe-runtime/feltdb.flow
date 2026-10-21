@@ -19,6 +19,7 @@ app appworks_recipe_runtime {
     currentStep: text
     data: json
     output: json?
+    origin: json?
     owner: text?
     leaseExpiresAt: datetime?
     events: integer
