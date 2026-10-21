@@ -5,9 +5,21 @@
  * authorizes nothing and makes nothing run.
  */
 import { digestOfBytes, signRelease } from "@distribution-protocol/protocol";
-import type { RecipePackage } from "@appport/recipe";
+import { basename } from "node:path";
+import { createRecipeLock, createRecipePackage, type RecipeEnvironment, type RecipePackage, type RecipeSource } from "@appport/recipe";
 import { FileChannel, ChannelError, type PublisherEnvelope, type SignedRelease } from "./channel.js";
 import { recipeReleaseManifest, type ReleaseInterface } from "./release.js";
+
+/**
+ * The package `appworks package publish <recipe.json>` builds from a recipe file and the publisher's environment: a portable lock
+ * against that environment's contracts, and provenance naming the file. One function, so that whatever previews a package (the
+ * Studio) and the command that publishes it cannot disagree about its digest. Carries no provider and grants nothing.
+ */
+export function packageForPublish(recipe: RecipeSource, snapshot: RecipeEnvironment, source: { file: string; revision?: string }): RecipePackage {
+  return createRecipePackage(recipe, createRecipeLock(recipe, { contracts: snapshot.contracts ?? {} }), {
+    provenance: { tool: "appworks package publish", source: { path: basename(source.file), ...(source.revision !== undefined ? { revision: source.revision } : {}) } }
+  });
+}
 
 export interface PublishSigner {
   publisher: string;

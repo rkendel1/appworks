@@ -36,6 +36,8 @@ require an AppPort release, and an AppPort release does not require an AppWorks 
             │                          └────────────→ @appport/schema ──────────→ @appport/protocol
             └──→ @distribution-protocol/protocol
 
+@appport/recipe-studio (private) ──→ @appport/recipe, @appport/recipe-distribution (packageForPublish only), @appport/recipe-runtime (types only), @appport/protocol
+
 @appport/assessment ──→ @appport/protocol
 @appport/extraction ──→ @appport/assessment, @appport/protocol, @appport/schema
 @appport/workspace (private) ──→ @appport/extraction, @appport/assessment, @appport/protocol, @appport/client, @appport/github, @feltdb/core
@@ -46,6 +48,7 @@ AppPort packages ──✗──→ anything in this repository
 @appport/assessment ──✗──→ @appport/core (not even for tests), @distribution-protocol/*, @appport/recipe, @appport/extraction
 @appport/extraction ──✗──→ @appport/core, @appport/sdk, @distribution-protocol/*, any adapter
 @appport/workspace  ──✗──→ @appport/core, @appport/services, another database or scheduler; @appport/sdk only as a devDependency (tests)
+@appport/recipe-studio ──✗──→ @distribution-protocol/*, @appport/core, @feltdb/core; never signs, grants, publishes, installs or runs
 anything else      ──✗──→ @appport/workspace
 ```
 
@@ -90,8 +93,14 @@ anything else      ──✗──→ @appport/workspace
    §6-§7). Its durable state is its own `feltdb.flow` in FeltDB, opened in `src/store.ts` only. It starts no process, server or
    connection. The workspace reaches its CLI only by a lazy import through an optional peer dependency (the `recipe` command, and `package` for `@appport/recipe-distribution`), and shares
    no state with it.
+10. **The Studio edits the recipe; it is not an authority, a publisher or a runtime.** `@appport/recipe-studio` (private) depends at run time on
+   `@appport/recipe`, `@appport/protocol`, `@appport/recipe-runtime` (types only: the gateway and authority ports) and
+   `@appport/recipe-distribution` (`packageForPublish` only, so a previewed package and a published one cannot differ). Its source never
+   grants or revokes, signs, trusts, publishes, acquires, installs or starts a run, and opens no store: those are `appworks package ...` and
+   `appworks recipe run --package`, with their own checks. Authority questions go to AppPort's own binder through the gateway's read-only
+   `access`. Only `src/server.ts` serves HTTP, on loopback. The workspace reaches its CLI by an optional peer dependency (`studio`).
 
-`scripts/check-boundary.mjs` enforces 1–4, 6, 7, 8 and 9 on every build (including that `@appport/core` is a runtime dependency of `@appport/recipe-runtime` only,
+`scripts/check-boundary.mjs` enforces 1–4 and 6–10 on every build (including that `@appport/core` is a runtime dependency of `@appport/recipe-runtime` only,
 and a test-only `devDependency` everywhere else). Rule 5 is a review rule.
 
 ## 4. How the recipe layer uses AppPort

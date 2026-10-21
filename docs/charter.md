@@ -51,7 +51,7 @@ one designed for a new application are the same kind of thing, fulfilled, resolv
 | Opening a pull request (`@appport/workspace`) | **implemented, tested against a fake provider only**: approval bound to head and base, a resumed run adopts the pull request instead of opening another. It needs a branch already on the remote |
 | Push of a promotion, deployment | **not implemented** (enforced and refused: `@appport/github` 1.0.2 has no push, commit or compare contract; no deployment contract) |
 | Write-capability extraction, source extraction into portable implementations, replacement planning, migration | **not implemented** |
-| Visual Recipe Studio | **not implemented** |
+| Visual Recipe Studio (`@appport/recipe-studio`, private) | **first slice, tested through the real lifecycle but not in a browser**: author the canonical `appport.recipe/1` recipe (edits, a catalog of the environment's capabilities), preview it as a recipe card, check it against a real AppPort environment (contract, providers, authority, contract drift) with unresolved facts kept unresolved, and make the package `appworks package publish` makes. It publishes, trusts, installs, grants and runs nothing. No graph, mapping or condition editors, run view or authentication |
 
 The recipe runtime executes recipes only in the slice above, against test providers; nothing in this repository extracts code, migrates an application or establishes that a business outcome occurred. An
 assessment reads an application; it does not run it, change it, or establish that anything it describes behaves as described. An

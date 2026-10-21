@@ -6,6 +6,7 @@
     { "path": "./packages/recipe" },
     { "path": "./packages/recipe-distribution" },
     { "path": "./packages/recipe-runtime" },
+    { "path": "./packages/recipe-studio" },
     { "path": "./packages/workspace" }
   ]
 }

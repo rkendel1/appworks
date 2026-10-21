@@ -114,7 +114,11 @@ leaves either the step not done or done and the run past it, never in between.
 CapabilityGateway {
   snapshot(recipe): environment for validateRecipe
   invoke({ dependency, input, idempotencyKey, requestId, signal? }): GatewayResult
+  resolve?(requires): ResolvedDependencyRecord by dependency   // who resolves each dependency here; for locking at install
+  catalog?(): active canonical contracts                       // read-only; for tools that compose recipes (the Studio)
+  access?(requires): DependencyAccess by dependency            // read-only; see below
 }
+DependencyAccess = granted { provider } | denied { provider, reason, message } | unresolved { reason } | ambiguous { reason }
 GatewayResult =
   success      { output, provider, canonical, verification }   // verification: the contract's declared state methods
   denied       { reason, message }                              // authorization refused the binding: provider NOT reached
@@ -127,6 +131,12 @@ GatewayResult =
 is **post-effect-unknown**: the implementation ran, or may have, and the caller cannot tell whether it committed (a timeout, a
 connection lost after a commit, a thrown error). The gateway does not classify `failed` further; the runtime treats it by the step's
 declared effect (§6.3).
+
+`catalog` and `access` are optional and read-only, added for the Recipe Studio (`packages/recipe-studio`). `access` asks AppPort's own binder
+(`CapabilityBinder.bindResolution`, the call `invoke` makes) whether the runtime's consumer would be authorized for what a dependency
+resolves to *now*, reading the durable grant and invoking nothing. It is not a second authorization mechanism and it cannot grant: the
+answer is the one the next invocation would get, and it can change before that invocation. A gateway that omits either method leaves the
+corresponding fact unresolved for any tool that asks; nothing is inferred.
 
 ### 6.2 Idempotency key
 

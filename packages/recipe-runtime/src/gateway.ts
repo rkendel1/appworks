@@ -3,7 +3,7 @@
  * eligible provider, has AppPort authorize the binding at this moment, invokes, and reports one of five results. The
  * runtime depends on this port; `createAppPortGateway` is the implementation over `@appport/core`.
  */
-import type { Dependency, JsonValue, StateVerification } from "@appport/protocol";
+import type { AppPortManifest, Dependency, JsonValue, StateVerification } from "@appport/protocol";
 import type { RecipeEnvironment, ResolvedDependencyRecord } from "@appport/recipe";
 
 export interface GatewayRequest {
@@ -34,6 +34,16 @@ export type GatewayResult =
   /** The provider ran, or may have, and returned no output. Whether it committed is unknown. */
   | { kind: "failed"; code: string; message: string };
 
+/**
+ * Whether the runtime's consumer would be allowed to use what a dependency resolves to, asked of AppPort's own binder and
+ * answered without invoking anything or changing a grant.
+ */
+export type DependencyAccess =
+  | { state: "granted"; provider: string }
+  | { state: "denied"; provider: string; reason: string; message: string }
+  | { state: "unresolved"; reason: string }
+  | { state: "ambiguous"; reason: string };
+
 export interface CapabilityGateway {
   /** What `validateRecipe` needs to check the recipe against this environment: active contracts and eligible providers. */
   snapshot(requires: readonly Dependency[]): Promise<RecipeEnvironment>;
@@ -43,6 +53,13 @@ export interface CapabilityGateway {
    * when it is installed. Rejects, naming each, if a dependency has no provider or more than one. Grants nothing.
    */
   resolve?(requires: readonly Dependency[]): Promise<Record<string, ResolvedDependencyRecord>>;
+  /** The active canonical contracts this environment holds, for choosing capabilities to compose. Read-only. */
+  catalog?(): Promise<Array<{ contract: string; manifest: AppPortManifest }>>;
+  /**
+   * For each declared dependency, whether the consumer's durable authority would permit the binding now. Read-only: nothing is
+   * invoked and nothing is granted, so asking changes no authority.
+   */
+  access?(requires: readonly Dependency[]): Promise<Record<string, DependencyAccess>>;
 }
 
 /** Who may start a recipe and answer its tasks. Distinct from the consumer's AppPort grant, which gates each invocation. */

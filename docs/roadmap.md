@@ -1,6 +1,6 @@
 # AppWorks roadmap
 
-Re-audited on 2026-10-21 against `main` at `7d8df89` plus the distribution slice (PR 4 of the sequence below). Every status was checked in code,
+Re-audited on 2026-10-21 against `main` at `7d8df89` plus the distribution slice (#13) and the Recipe Studio slice (this PR, on top of it). Every status was checked in code,
 tests or CI, not taken from documentation. Where code and documentation disagree, the code is the record. The first audit (`47a356e`) is
 summarised in §2.3 so that what changed since is visible.
 
@@ -26,7 +26,8 @@ Two end-to-end outcomes drive prioritization. Everything else is ranked by how d
 | #10 `feat/recipe-runtime` | Phase 3: durable recipe execution through AppPort, FeltDB state, independent verification, uncertain outcomes never resubmitted, `appworks recipe run/status/resume` | `spec/runtime-1.md`; `packages/recipe-runtime/test/runtime.test.ts` |
 | #11 `feat/recipe-runtime-conformance` | the crash-boundary matrix with real SIGKILLs; a **stale-worker overwrite defect found and fixed** (lease tokens); reconciliation of a lost invocation by durable key; human-task durability | `spec/runtime-1.md` §6.5, §8, §13; `conformance.test.ts`, `workers.test.ts` |
 | #12 `feat/recipe-verification-recovery` | a recorded result with inconclusive verification is recovered by re-verifying, never by invoking; **a latent bug fixed** (an inconclusive finding was reused as a verdict); runs report what the records establish | `spec/runtime-1.md` §3.1, §6.6; `verification.test.ts` |
-| this slice | Phase 4: publish, acquire (verified, with receipts), install and run, across two environments | `spec/distribution-1.md`; `packages/recipe-distribution/test/{lifecycle,e2e,cli}.test.ts` |
+| #13 `feat/recipe-distribution-lifecycle` | Phase 4: publish, acquire (verified, with receipts), install and run, across two environments | `spec/distribution-1.md`; `packages/recipe-distribution/test/{lifecycle,e2e,cli}.test.ts` |
+| this slice `feat/recipe-studio` | Phase 5, first slice: author, check against a real environment, preview and package a recipe; the package traverses the existing lifecycle | `packages/recipe-studio/README.md`; `packages/recipe-studio/test/{authoring,readiness,lifecycle,ui,cli}.test.ts` |
 
 `main` has been green in CI on every merge since `47a356e` (`check` and `memos`). Three earlier pushes had been red.
 
@@ -56,7 +57,8 @@ independent persisted ledger, with test providers; no recipe has run against a r
 | Open PR | Y | Y | - | - | - | fake provider only |
 | Push, deployment | - | - | - | - | - | |
 | Generated extraction, write extraction, portable implementations, replacement, migration | - | - | - | - | - | **Path B has not moved since the first audit** |
-| Visual Recipe Studio | - | - | - | - | - | |
+| Recipe Studio: authoring, readiness, card, package (`appworks studio`) | Y | Y | Y | Y (through the API) | - | the lifecycle test drives the Studio over HTTP and hands its package to the existing commands; **the page has not been tried in a browser** (its script runs against the real server under a small DOM) |
+| Studio: graph view, mapping/condition editors, run view, authentication | - | - | - | - | - | Phase 5.1 (graph), 5.3, 5.5, 5.6 |
 
 ### 2.3 Findings still open from the first audit
 
@@ -66,7 +68,7 @@ independent persisted ledger, with test providers; no recipe has run against a r
 | C2 | The workflow executes **only hand-authored, reviewed extraction directories** (`workflow.ts:640-641`: "the workspace does not generate one"); `extractions/` holds one, for Memos. This is the largest gap on Path B | open (Phase 1.1) |
 | C3 | The install/"cited capabilities" path is an AppPort *proxy*, not an extraction: no contract mapping, adapter, behavioral verification or claim | open; keep distinct |
 | C5 | Memos end-to-end is proven in CI only; the default suite uses a synthetic service with stub runners; it depends on the `rkendel1/memos` fork (bridge pass-through) that is not merged upstream; the Aider run has no recorded result | open (0.5) |
-| C6 | `@appport/assessment` and `@appport/extraction` return 404 on npm although `docs/compatibility.md` presents them as released libraries. `@appport/recipe` and `@appport/recipe-distribution` are on npm at 0.1.0; **this slice makes `recipe-distribution` 0.2.0, which is unpublished** (`publish-packages.mjs` skips versions already on the registry, so it will publish it) | open (0.4) |
+| C6 | `@appport/assessment` and `@appport/extraction` return 404 on npm although `docs/compatibility.md` presents them as released libraries. `@appport/recipe` and `@appport/recipe-distribution` are on npm at 0.1.0; **#13 makes `recipe-distribution` 0.2.0, which is unpublished** (`publish-packages.mjs` skips versions already on the registry, so it will publish it) | open (0.4) |
 | - | No authentication on the web workspace (loopback only) | open (5.6) |
 | - | Branch protection is **off** on `main` (`protected: false`) | open (0.2) |
 
@@ -74,9 +76,9 @@ Resolved since: C4 (CI on the new head is green), the Phase 3 gap, and the "dist
 
 ## 3. Roadmap
 
-**Order from here:** the owner's sequence is *runtime conformance (done) -> distribution (done) -> Visual Recipe Studio -> generalized extraction ->
-capability replacement*. This audit's recommendation is to keep that order for **Phase 5** but to start the design of **Phase 1.1 in parallel**, because
-Outcome A is now demonstrated end to end except for authoring, while Outcome B, the harder half of the product, has had no progress and is the longest
+**Order from here:** the owner's sequence is *runtime conformance (done) -> distribution (done) -> Visual Recipe Studio (first slice done) -> generalized extraction ->
+capability replacement*. The next step in that order is **Phase 1.1**, and its design should start now: Outcome A is demonstrated end to end,
+authored in the Studio, packaged, acquired, installed and run in another environment (with test providers, through the Studio's API rather than a browser), while Outcome B, the harder half of the product, has had no progress and is the longest
 pole. Phase 2 (delivery) waits on a decision that is not engineering (decision 1). Each phase ends only when its exit test runs in CI.
 
 ### Phase 0: Trustworthy baseline (small; start now)
@@ -84,7 +86,7 @@ pole. Phase 2 (delivery) waits on a decision that is not engineering (decision 1
 Goal: main is green by construction, the docs say what the code does, and the environment is reproducible.
 
 **Status:** 0.1, 0.2 (`protected: false` on `main`), 0.4, 0.5 and 0.6 are open. 0.3 is partly done: the charter now describes the runtime and
-distribution, and the pull-request row (C1) is corrected in this slice; the npm/compatibility drift (C6) remains. `pnpm test` already runs
+distribution, and the pull-request row (C1) is corrected in #13; the npm/compatibility drift (C6) remains. `pnpm test` already runs
 both suites (`test:fast`, `test:processes`) and CI runs it.
 
 | # | Task | Done when |
@@ -145,7 +147,7 @@ independent ledger; a dropped response is `uncertain` and not retried; provider 
 
 ### Phase 4: Package distribution: **exit met over a file channel; registry work open**
 
-Delivered in this slice (`spec/distribution-1.md`): a file release channel; publishing a signed release bound to the publisher's document that never
+Delivered in #13 (`spec/distribution-1.md`): a file release channel; publishing a signed release bound to the publisher's document that never
 changes once published; acquisition that verifies the signature before reading a release, the consumer's *anchored* trust policy, and the signed
 digest before returning any bytes, with a validated Distribution Protocol receipt; installation that validates against the receiving environment,
 resolves *its* providers and writes *its* lock, refuses without verified trust, and authorizes nothing; `appworks package ...`; and
@@ -165,22 +167,30 @@ install trust gate, trust anchoring and the install-time digest pin each fail te
 | 4.9 | Check that the roles human tasks need exist in the environment's authority | recorded in the install record, not checkable by AppWorks |
 | 4.10 | Publish `@appport/recipe-distribution` 0.2.0 | a human action: `pnpm publish:packages` |
 
-### Phase 5: Visual Recipe Studio (needs 3; 4 for the package action)
+### Phase 5: Visual Recipe Studio: **first slice done; four tasks open**
 
-The UI edits the canonical `appport.recipe/1` document and calls the same `validateRecipe` / package functions as the CLI; it has no
-model of its own.
+The Studio (`packages/recipe-studio`, private) edits the canonical `appport.recipe/1` document and calls the same `validateRecipe`, lock and
+package functions as the CLI; it has no model of its own, no key, no trust policy, no grant and no execution. Publishing, trust, installation
+and running remain `appworks package ...` and `appworks recipe run --package`. Two additive changes elsewhere, neither changing a contract:
+the runtime's `CapabilityGateway` gained optional read-only `catalog` and `access` (`spec/runtime-1.md` §6.1; `access` asks AppPort's own binder, and
+a gateway without it leaves authority *unresolved*), and `@appport/recipe-distribution` exports `packageForPublish`, which the CLI now also uses, so a previewed
+package and a published one cannot differ.
 
-| # | Task |
-|---|---|
-| 5.1 | Read-only recipe viewer: graph of steps, branches, human tasks, dependencies, unresolved requirements, findings from `validateRecipe` |
-| 5.2 | Editing with continuous validation; capability discovery panel backed by AppPort discovery |
-| 5.3 | Mapping and condition editors over the typed expression language |
-| 5.4 | Package action producing the same digest as the CLI (test asserts byte equality) |
-| 5.5 | Run view: execution state and evidence from the runtime |
-| 5.6 | Authentication boundary for the web server before any non-loopback hosting |
+| # | Task | State |
+|---|---|---|
+| 5.1 | Read-only recipe viewer | **done as a recipe card** in the printed-recipe format (inputs as ingredients, steps spanning what they read, setup, finish) with step inspection and findings; **not a graph**: branches are listed per step |
+| 5.2 | Editing with continuous validation; capability discovery panel | **done**: edit operations on the canonical document; a catalog read from the environment's active contracts, from which a step's dependency, shapes, effect and declared verification are derived. Validation is re-run whenever a view is opened, not as you type. The catalog is AppPort's contract registry, not provider discovery; providers are reported per dependency under readiness |
+| 5.3 | Mapping and condition editors over the typed expression language | **open**: a step is edited as its JSON |
+| 5.4 | Package action producing the same digest as the CLI | **done**, and asserted: the Studio's digest equals what `appworks package publish` publishes for the Studio's file and for `examples/supplier-invoice/recipe.json` |
+| 5.5 | Run view | **open** (`appworks recipe status` shows execution state and origin) |
+| 5.6 | Authentication boundary for the web server | **open**: loopback only, as the workspace |
 
-Exit: the supplier-invoice recipe is created in the Studio from empty, validates, shows its unresolved dependencies, and packages to
-the same digest as the checked-in recipe via the CLI.
+Exit ("the supplier-invoice recipe is created in the Studio from empty, validates, shows its unresolved dependencies, and packages to the
+same digest as the checked-in recipe via the CLI"): **met, through the API and the CLI, in `lifecycle.test.ts`**, which then publishes, verifies,
+installs in a second environment with a different provider, runs and inspects the run's origin. "Created in the Studio" means through its
+edit operations over HTTP, not by a person in a browser. Provider bindings: the Studio shows what the chosen environment resolves for each
+dependency and refuses to call a recipe ready where it resolves none or several; it does not let an author pin a provider, because that
+would put an environment's choice into the portable recipe (open decision 8).
 
 ### Phase 6: Replacement and migration (outcome B)
 
@@ -219,7 +229,8 @@ same contract digest, and show the Phase 3 recipe that calls it passes unchanged
 | 14 | change a capability's implementation | done (a second provider with other names) |
 | 15 | recipe unchanged when the contract is unchanged | done for substitution; **not** for a contract revision (no compatibility test across contract versions) |
 
-   What remains for this project is authoring (Phase 5) and a real provider (Phase 6).
+   The Studio test (`packages/recipe-studio/test/lifecycle.test.ts`) exercises steps **4-9, 11, 14** and the automatic path of 10 with a package made in the Studio;
+   12 and 13 are covered by the runtime's own tests, not through a Studio-made package. What remains for this project is a real provider (Phase 6), a contract revision test (15), and 1-3.
 2. **Memos (outcome B, read path).** Permanent regression: `pnpm extraction:memos --check --mutations` plus `memos-e2e.test.ts`. A passing Memos run does not count toward Phase 1 or 6 exits on its own.
 3. **Second application (outcome B, generality).** Phase 1.2 picks it; it must not be Go-and-proto-only by luck of selection.
 
@@ -242,3 +253,6 @@ same contract digest, and show the Phase 3 recipe that calls it passes unchanged
 5. **npm (0.4, 4.10):** are `@appport/assessment` and `@appport/extraction` meant to be public now? Publish `@appport/recipe-distribution` 0.2.0?
 6. **Branch protection (0.2):** require `check` and `memos` on `main`? It is a repository setting, not a code change.
 7. **A registry (4.5):** will recipes be distributed through a hosted Distribution Protocol registry, or is a file or mirrored channel enough for the foreseeable consumers?
+8. **Provider binding (Phase 5):** should an author be able to say which provider an environment uses, and where does that live? The recipe must stay portable, so
+   it cannot name a provider; today the environment's operator leaves exactly one eligible provider. A per-environment binding profile owned by the environment is
+   the likely answer, and it needs AppPort to say what a profile may express.

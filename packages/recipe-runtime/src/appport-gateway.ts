@@ -25,7 +25,7 @@ import {
   type StateVerification
 } from "@appport/protocol";
 import type { RecipeEnvironment, RecipeSource, ResolvedDependencyRecord } from "@appport/recipe";
-import type { CapabilityGateway, GatewayRequest, GatewayResult } from "./gateway.js";
+import type { CapabilityGateway, DependencyAccess, GatewayRequest, GatewayResult } from "./gateway.js";
 
 export interface AppPortGatewayOptions {
   registry: ApplicationRegistry;
@@ -95,6 +95,30 @@ export function createAppPortGateway(options: AppPortGatewayOptions): Capability
         else problems.push(`${d.id}: ${result.kind === "ambiguous" ? "more than one eligible provider" : result.reason}`);
       }
       if (problems.length) throw new Error(problems.join("; "));
+      return out;
+    },
+
+    async catalog() {
+      return (await options.contracts.list()).filter((r) => r.status === "active").map((r) => ({ contract: r.id, manifest: r.manifest }));
+    },
+
+    async access(requires): Promise<Record<string, DependencyAccess>> {
+      const out: Record<string, DependencyAccess> = {};
+      for (const d of requires) {
+        const chosen = await versionOf(d);
+        if (!chosen) {
+          out[d.id] = { state: "unresolved", reason: `contract ${target(d).contract} has no active version of ${target(d).capability} accepted by ${d.versionConstraint ?? "1"}` };
+          continue;
+        }
+        const resolution = await resolver().resolveRequirement(requirementOf(d, chosen.version) as never);
+        if (resolution.kind !== "resolved") {
+          out[d.id] = resolution.kind === "ambiguous" ? { state: "ambiguous", reason: "more than one eligible provider" } : { state: "unresolved", reason: resolution.reason };
+          continue;
+        }
+        // The same binder the invocation uses; binding here reads the durable grant and invokes nothing.
+        const bound = await options.binder.bindResolution(options.consumer, resolution);
+        out[d.id] = bound.kind === "denied" ? { state: "denied", provider: resolution.provider.id, reason: bound.authorization.reason, message: bound.authorization.message } : { state: "granted", provider: resolution.provider.id };
+      }
       return out;
     },
 
