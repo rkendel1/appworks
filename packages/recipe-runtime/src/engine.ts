@@ -23,8 +23,10 @@ import type { StateExpectation, ValueRef } from "@appport/protocol";
 import { permissiveAuthority, type CapabilityGateway, type GatewayResult, type RuntimeAuthority } from "./gateway.js";
 import {
   RuntimeError,
+  type Assessment,
   type HumanTaskRecord,
   type ReconciliationRecord,
+  type RunEventRecord as RunEventRow,
   type Resolution,
   type InvocationRecord,
   type RecipeRunRecord,
@@ -48,7 +50,9 @@ export type RuntimePoint =
   | "invoke:outcome-recorded"
   | "task:waiting"
   | "step:committed"
+  | "verify:probe-returned"
   | "verify:completed"
+  | "reconcile:evidence"
   | "run:finished";
 
 export interface RuntimeOptions {
@@ -76,6 +80,8 @@ export interface RunView {
   principal: string;
   /** A run with a lease that has expired and that is not finished: a worker died. `resume` takes it over. */
   interrupted: boolean;
+  /** What the records establish, distinguishing an unknown invocation outcome from a recorded-but-unverified one (spec §3.1). */
+  assessment: Assessment;
   steps: Array<Pick<StepAttemptRecord, "stepId" | "kind" | "status" | "route" | "next">>;
   invocations: Array<Pick<InvocationRecord, "id" | "stepId" | "purpose" | "effect" | "status" | "classification" | "idempotencyKey" | "provider" | "cause" | "error">>;
   verifications: Array<Pick<VerificationRecord, "stepId" | "methodId" | "source" | "result" | "reason">>;
@@ -230,7 +236,9 @@ export class RecipeRuntime {
     if (!(await this.authority.canReconcile?.(principal, run.recipeId))) throw new RuntimeError("AUTHORITY_DENIED", `${principal} may not reconcile ${run.recipeId}`);
     if (run.status !== "finished" || run.outcome !== "uncertain") throw new RuntimeError("NOT_RECONCILABLE", `${runId} is ${run.status}${run.outcome ? ` / ${run.outcome}` : ""}; only a finished, uncertain run is reconciled`);
     const uncertain = (await this.store.list<InvocationRecord>("Invocation", { runId })).filter((i) => i.purpose === "step" && i.status === "uncertain");
-    if (uncertain.length !== 1) throw new RuntimeError("NOT_RECONCILABLE", `${runId} has ${uncertain.length} uncertain invocations; this run is uncertain for another reason (for example, verification could not run) and only a single lost invocation is reconciled`);
+    // No lost invocation: the result was recorded and it is verification that settled nothing. Recover that instead (§6.6).
+    if (uncertain.length === 0) return this.recoverVerification(run);
+    if (uncertain.length !== 1) throw new RuntimeError("NOT_RECONCILABLE", `${runId} has ${uncertain.length} uncertain invocations; only a single lost invocation is reconciled`);
     const invocation = uncertain[0]!;
     const step = run.recipe.steps.find((s) => s.id === invocation.stepId) as CapabilityStep;
     const toUncertain = run.recipe.steps.find((s) => s.id === step.on.uncertain);
@@ -254,7 +262,7 @@ export class RecipeRuntime {
       const lookupDependency = { id: "(reconciliation)", relationship: "invokes", target: { contract: target.contract, capability: declaration.capability }, required: true, versionConstraint: String(declaration.version) } as RecipeSource["requires"][number];
       const key = "wf1-" + digestOf({ reconcile: invocation.id, ordinal: n } as never).replace(/^sha256:/, "");
       const result = await this.call(lookupDependency, { [declaration.keyField]: invocation.idempotencyKey } as JsonValue, key, `${id}.lookup`);
-      lookupId = `${runId}.${step.id}.r${n}`;
+      lookupId = `${runId}.${step.id}.lookup-${randomUUID().slice(0, 8)}`; // unique per attempt: the Reconciliation record and the run fence are what serialize reconcilers
       const at = this.iso();
       const probe: InvocationRecord = {
         id: lookupId, runId, stepId: step.id, purpose: "reconciliation", ordinal: n, dependency: lookupDependency.id, effect: "observation", idempotencyKey: key,
@@ -292,6 +300,7 @@ export class RecipeRuntime {
       }
     }
 
+    await this.options.hook?.("reconcile:evidence", { run: runId, step: step.id });
     const record: ReconciliationRecord = { id, runId, stepId: step.id, invocation: invocation.id, operationKey: invocation.idempotencyKey, resolution, ...(lookupId ? { lookup: lookupId } : {}), evidence, ...(reason ? { reason } : {}), by: principal, at: this.iso() };
     const fresh = await this.load(runId); // the authoritative transition is fenced on the run as it is now
     if (fresh.status !== "finished" || fresh.outcome !== "uncertain" || fresh.__version !== run.__version) throw new RuntimeError("CONFLICT", `${runId} changed while it was being reconciled (another reconciliation or worker); nothing was changed`);
@@ -320,6 +329,77 @@ export class RecipeRuntime {
     }
     await this.store.commit(writes);
     return this.drive(runId);
+  }
+
+  /**
+   * Verification recovery (spec §6.6): the run is uncertain although no invocation outcome was lost, because verification of a
+   * *recorded* result was inconclusive. The invocation is never repeated; the run is reopened where its recorded result lives
+   * (the capability step, or the `completed` end whose outcome verification settled nothing) and the ordinary code verifies
+   * again, with the current authority, taking the recipe's own edges. The claim is the same fenced, token-bearing reopening
+   * as any other, so of several recoverers one wins and a stale worker cannot write afterwards.
+   */
+  private async recoverVerification(run: Versioned<RecipeRunRecord>): Promise<RunView> {
+    const runId = run.id;
+    const end = run.recipe.steps.find((s) => s.id === run.endStep);
+    let reopenAt: string;
+    let basis: string;
+    if (end?.kind === "end" && end.outcome === "completed") {
+      reopenAt = end.id;
+      basis = "outcome-verification";
+    } else {
+      const succeeded = (await this.store.list<InvocationRecord>("Invocation", { runId })).filter((i) => i.purpose === "step" && i.status === "succeeded" && i.effect === "consequential");
+      const candidates: string[] = [];
+      for (const inv of succeeded) {
+        const step = run.recipe.steps.find((s) => s.id === inv.stepId);
+        const attempt = await this.store.get<StepAttemptRecord>("StepAttempt", `${runId}.${inv.stepId}`);
+        if (step?.kind === "capability" && attempt?.route === "uncertain" && step.on.uncertain === run.endStep) candidates.push(step.id);
+      }
+      if (candidates.length !== 1) throw new RuntimeError("NOT_RECONCILABLE", `${runId} is uncertain, but not because one lost invocation or one unverified recorded result can be identified (${candidates.length} candidate steps); it is for a person`);
+      reopenAt = candidates[0]!;
+      basis = "step-verification";
+    }
+    await this.store.commit([
+      this.runWrite(run, { status: "running", currentStep: reopenAt, owner: this.claim(runId), leaseExpiresAt: this.lease(), outcome: null, endStep: null, reason: null, finishedAt: null }),
+      this.event(runId, run.events + 1, "verification.recovery", reopenAt, { basis, from: run.endStep ?? null })
+    ]);
+    return this.drive(runId);
+  }
+
+  /** What the records establish, kept apart (spec §3.1). Derived from authoritative records only; never from a provider's say-so. */
+  private assess(run: RecipeRunRecord, invocations: InvocationRecord[], verifications: VerificationRecord[], rechecks: number): Assessment {
+    const latest = new Map<string, VerificationRecord>();
+    for (const v of [...verifications].sort((a, b) => (a.id < b.id ? -1 : 1))) latest.set(`${v.stepId}\u0000${v.methodId}`, v);
+    const findings = [...latest.values()];
+    const evidence = (list: VerificationRecord[]) => list.map((v) => ({ stepId: v.stepId, methodId: v.methodId, source: v.source, result: v.result, ...(v.reason ? { reason: v.reason } : {}) }));
+    const stepInvocations = invocations.filter((i) => i.purpose === "step");
+    const base = { rechecks };
+    if (run.status === "waiting") return { ...base, state: "waiting", summary: "waiting for a person to answer a task", evidence: [], next: "recipe answer | expire" };
+    if (run.status === "running") return { ...base, state: "in-progress", summary: "a worker is driving this run, or died holding it", evidence: evidence(findings.filter((v) => v.result !== "confirmed")), next: "recipe resume (once its lease has expired)" };
+    switch (run.outcome) {
+      case "completed":
+        return { ...base, state: "verified", summary: "the provider's result is recorded and the business outcome was independently verified", evidence: evidence(findings.filter((v) => v.result === "confirmed")) };
+      case "rejected":
+        return { ...base, state: "rejected", summary: "a business rejection; nothing was done that needs reconciling", evidence: [] };
+      case "uncertain": {
+        const lost = stepInvocations.find((i) => i.status === "uncertain");
+        if (lost) return { ...base, state: "invocation-outcome-unknown", step: lost.stepId, invocation: lost.id, summary: "a consequential call may have happened and its outcome was not recorded; it was not and will not be resubmitted", evidence: [], next: "recipe reconcile (looks the original operation up by its durable key)" };
+        const unresolved = findings.filter((v) => v.result === "inconclusive");
+        const recorded = stepInvocations.find((i) => i.effect === "consequential" && i.status === "succeeded");
+        if (unresolved.length || recorded)
+          return { ...base, state: "recorded-unverified", ...(recorded ? { step: recorded.stepId, invocation: recorded.id } : {}), summary: "the provider's result is recorded and the operation will not be repeated, but nothing independent has confirmed the business outcome", evidence: evidence(unresolved), next: "recipe reconcile re-verifies without invoking anything; if it stays inconclusive, check the provider's authoritative state by hand" };
+        return { ...base, state: "unresolved", summary: "uncertain by the recipe's own routing; the records do not say why", evidence: [] };
+      }
+      case "failed": {
+        const contradicted = findings.filter((v) => v.result === "contradicted");
+        if (contradicted.length)
+          return { ...base, state: "business-outcome-unexpected", step: contradicted[0]!.stepId, summary: "independent state contradicts the expected result. The operation may well have executed; this is not evidence that it did not. It was not repeated.", evidence: evidence(contradicted), next: "inspect the provider's state, then correct or compensate by hand" };
+        if (stepInvocations.some((i) => i.cause === "reconciled-not-executed")) return { ...base, state: "not-executed-confirmed", summary: "the provider confirmed, strongly consistent and with the key fenced, that the operation was not executed", evidence: [] };
+        if (stepInvocations.some((i) => i.status === "failed" && i.classification === "pre-effect")) return { ...base, state: "failed-no-effect", summary: "refused before the provider ran; nothing happened", evidence: [] };
+        return { ...base, state: "failed", summary: run.reason ?? "ended failed by the recipe", evidence: [] };
+      }
+      default:
+        return { ...base, state: "unresolved", summary: "no outcome", evidence: [] };
+    }
   }
 
   /** The runs in this home, oldest first. */
@@ -419,8 +499,15 @@ export class RecipeRuntime {
   private async finish(run: Versioned<RecipeRunRecord>, stepId: string, outcome: RunOutcome, reason?: string, output?: JsonValue, kind: StepAttemptRecord["kind"] = "end"): Promise<void> {
     const at = this.iso();
     const writes: Write[] = [];
-    const record: StepAttemptRecord = { id: `${run.id}.${stepId}`, runId: run.id, stepId, kind, status: "completed", route: outcome, startedAt: at, finishedAt: at };
-    writes.push({ collection: "StepAttempt", id: record.id, value: record, create: true });
+    // An end can be reached again after a run was reopened for recovery: its attempt is updated, never duplicated.
+    const earlier = await this.store.get<StepAttemptRecord>("StepAttempt", `${run.id}.${stepId}`);
+    if (earlier) {
+      const { __version: av, ...rest } = earlier;
+      writes.push({ collection: "StepAttempt", id: earlier.id, value: { ...rest, status: "completed", route: outcome, finishedAt: at }, ifVersion: av });
+    } else {
+      const record: StepAttemptRecord = { id: `${run.id}.${stepId}`, runId: run.id, stepId, kind, status: "completed", route: outcome, startedAt: at, finishedAt: at };
+      writes.push({ collection: "StepAttempt", id: record.id, value: record, create: true });
+    }
     writes.push(this.runWrite(run, { status: "finished", outcome, endStep: stepId, ...(reason ? { reason } : {}), ...(output !== undefined ? { output } : {}), finishedAt: at, owner: null, leaseExpiresAt: null }, 1));
     writes.push(this.event(run.id, run.events + 1, "run.finished", stepId, { outcome, ...(reason ? { reason } : {}) }));
     await this.store.commit(writes);
@@ -646,20 +733,27 @@ export class RecipeRuntime {
     const guard = async () => {
       if (owned) await this.loadOwned(run.id);
     };
+    // Every attempt at a method is its own record, so a failed attempt is history and a later one is not blocked by it. Only a
+    // *conclusive* record (confirmed or contradicted) stands in for a new probe: an inconclusive one established nothing.
+    const all = await this.store.list<VerificationRecord>("Verification", { runId: run.id });
+    const attemptsOf = (methodId: string) => all.filter((v) => v.stepId === stepId && v.methodId === methodId).sort((a, b) => (a.id < b.id ? -1 : 1));
+    const suffix = (n: number) => (n === 0 ? "" : `.try-${String(n).padStart(3, "0")}`);
     if (!methods.length) {
       await guard();
-      await this.recordVerification({ id: `${run.id}.${stepId}.none`, runId: run.id, stepId, methodId: "(none)", source: "contract", result: "inconclusive", checks: [], reason: "no verification method is declared, so nothing independent establishes the effect", at: this.iso() }, undefined);
+      await this.recordVerification({ id: `${run.id}.${stepId}.none${suffix(attemptsOf("(none)").length)}`, runId: run.id, stepId, methodId: "(none)", source: "contract", result: "inconclusive", checks: [], reason: "no verification method is declared, so nothing independent establishes the effect", at: this.iso() }, undefined);
       await this.options.hook?.("verify:completed", { run: run.id, step: stepId });
       return "inconclusive";
     }
     const verdicts: Verdict[] = [];
     for (const method of methods) {
-      const id = `${run.id}.${stepId}.${method.id}`;
-      const recorded = await this.store.get<VerificationRecord>("Verification", id);
-      if (recorded) {
-        verdicts.push(recorded.result);
+      const earlier = attemptsOf(method.id);
+      const latest = earlier.at(-1);
+      if (latest && latest.result !== "inconclusive") {
+        verdicts.push(latest.result);
         continue;
       }
+      const id = `${run.id}.${stepId}.${method.id}${suffix(earlier.length)}`;
+      const probeId = `${run.id}.${stepId}.v-${method.id}${suffix(earlier.length)}`;
       // A contract's method names a capability of that contract; the recipe must declare a dependency on it to probe it.
       const dependency = method.probe.uses
         ? run.recipe.requires.find((d) => d.id === method.probe.uses)
@@ -672,16 +766,17 @@ export class RecipeRuntime {
         const input = Object.fromEntries(Object.entries(method.probe.input).map(([k, v]) => [k, this.valueOf(v, scope)])) as JsonValue;
         const key = "wf1-" + digestOf({ run: run.id, step: stepId, verification: method.id, input } as never).replace(/^sha256:/, "");
         const result = await this.call(dependency, input, key, `${id}.probe`);
+        await this.options.hook?.("verify:probe-returned", { run: run.id, step: stepId });
         const at = this.iso();
         probe = {
-          id: `${run.id}.${stepId}.v-${method.id}`, runId: run.id, stepId, purpose: "verification", ordinal: 1, dependency: dependency.id, effect: "observation",
+          id: probeId, runId: run.id, stepId, purpose: "verification", ordinal: 1, dependency: dependency.id, effect: "observation",
           idempotencyKey: key, inputDigest: digestOf(input as never), input, startedAt: at, finishedAt: at,
           ...(result.kind === "success"
             ? { status: "succeeded" as const, classification: "success" as const, provider: result.provider as unknown as JsonValue, output: result.output }
             : { status: "failed" as const, classification: result.kind === "failed" ? ("effect-unknown" as const) : ("pre-effect" as const), error: { code: result.kind, message: "message" in result ? result.message : (result as { reason: string }).reason } })
         };
         if (result.kind !== "success") {
-          record = { id, runId: run.id, stepId, methodId: method.id, source: method.source, result: "inconclusive", invocation: probe.id, checks: [], reason: `the probe did not return state (${result.kind}); nothing is established`, at };
+          record = { id, runId: run.id, stepId, methodId: method.id, source: method.source, result: "inconclusive", invocation: probe.id, checks: [], reason: `the probe did not return state (${result.kind}${"code" in result ? `: ${result.code}` : ""}); nothing is established`, at };
         } else {
           const checks = method.expect.map((e) => {
             const actual = readPointer(result.output, e.at) as JsonValue | undefined;
@@ -744,10 +839,12 @@ export class RecipeRuntime {
   private async view(runId: string): Promise<RunView> {
     const run = await this.load(runId);
     const by = <T extends { id: string }>(collection: "StepAttempt" | "Invocation" | "Verification" | "HumanTask") => this.store.list<T>(collection, { runId }).then(sorted);
+    const events = (await this.store.list<RunEventRow>("RunEvent", { runId })).filter((e) => e.type === "verification.recovery").length;
     const [steps, invocations, verifications, tasks, reconciliations] = await Promise.all([by<StepAttemptRecord>("StepAttempt"), by<InvocationRecord>("Invocation"), by<VerificationRecord>("Verification"), by<HumanTaskRecord>("HumanTask"), this.store.list<ReconciliationRecord>("Reconciliation", { runId }).then(sorted)]);
     return {
       id: run.id, recipeId: run.recipeId, recipeDigest: run.recipeDigest, status: run.status,
       ...(run.outcome ? { outcome: run.outcome } : {}), ...(run.endStep ? { endStep: run.endStep } : {}), ...(run.reason ? { reason: run.reason } : {}),
+      assessment: this.assess(run, invocations, verifications, events),
       currentStep: run.currentStep, ...(run.output !== undefined ? { output: run.output } : {}), principal: run.principal,
       interrupted: run.status === "running" && Boolean(run.leaseExpiresAt) && Date.parse(run.leaseExpiresAt!) <= this.now(),
       steps: steps.map((s) => ({ stepId: s.stepId, kind: s.kind, status: s.status, ...(s.route ? { route: s.route } : {}), ...(s.next ? { next: s.next } : {}) })),

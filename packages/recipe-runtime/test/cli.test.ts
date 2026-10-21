@@ -111,3 +111,41 @@ describe("appworks recipe answer | expire | reconcile", () => {
     expect((await cli(["recipe", "status", lost.id, "--home", join(dir, "home")])).out).toContain("reconcile submit: confirmed-completed");
   });
 });
+
+describe("appworks recipe status | reconcile for a recorded result whose verification is unresolved", () => {
+  it("tells it apart from an unknown outcome and from success, and re-verifies without invoking", async () => {
+    const recipe = supplierInvoice();
+    const recipeFile = join(dir, "recipe.json");
+    writeFileSync(recipeFile, JSON.stringify(recipe));
+    const accounting = await accountingEnvironment(join(dir, "env"), recipe);
+    closers.push(() => accounting.close());
+    const environment: CliEnvironment = { load: async () => ({ gateway: accounting.gateway }) };
+    const home = join(dir, "home");
+    const common = ["--environment", "env.mjs", "--home", home];
+
+    accounting.ledger.faults.read = "unavailable";
+    const run = await cli(["recipe", "run", recipeFile, "--input", JSON.stringify(AUTO), ...common, "--json"], environment);
+    expect(run.code).toBe(12);
+    const id = JSON.parse(run.out).id;
+    const status = await cli(["recipe", "status", id, "--home", home]);
+    expect(status.out).toContain("assessment: recorded-unverified");
+    expect(status.out).toContain("the provider's result is recorded and the operation will not be repeated");
+    expect(status.out).toContain("nothing is established"); // the evidence line says why
+    expect(status.out).toContain("next: recipe reconcile re-verifies without invoking anything");
+    expect(status.out).toContain("finished / uncertain"); // not reported as failed, and not as succeeded
+    expect(status.out).not.toContain("/ failed");
+    expect(status.out).not.toContain("assessment: failed");
+    expect(status.out).not.toContain("assessment: verified");
+
+    const still = await cli(["recipe", "reconcile", id, ...common], environment);
+    expect(still.code).toBe(12); // evidence still cannot exist: unresolved, not failed
+    expect(still.out).toContain("verification recoveries so far: 1");
+
+    accounting.ledger.faults.read = undefined;
+    const done = await cli(["recipe", "reconcile", id, ...common], environment);
+    expect(done.code).toBe(0);
+    expect(done.out).toContain("assessment: verified");
+    expect((await accounting.ledger.invoices())).toHaveLength(1);
+    expect(accounting.ledger.attempts).toEqual(["s1/INV-1"]); // one submit, ever
+  });
+});

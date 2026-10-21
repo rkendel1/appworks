@@ -7,7 +7,7 @@ export default {
   ...base,
   test: {
     environment: "node",
-    include: ["packages/recipe-runtime/test/conformance.test.ts", "packages/recipe-runtime/test/workers.test.ts"],
+    include: ["packages/recipe-runtime/test/conformance.test.ts", "packages/recipe-runtime/test/workers.test.ts", "packages/recipe-runtime/test/verification.test.ts"],
     exclude: ["**/node_modules/**"],
     fileParallelism: false,
     testTimeout: 180000

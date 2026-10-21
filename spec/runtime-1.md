@@ -55,6 +55,23 @@ A finished run has exactly one **outcome**, the `outcome` of the end step it rea
 
 `uncertain` is the one terminal state that can be left: reconciliation (§6.5) may reopen a run that finished `uncertain` because a consequential invocation's outcome was lost, and only with evidence. Every other terminal state is final.
 
+### 3.1 What the records establish
+
+The outcome above is the recipe's routing. Beside it, a run reports an **assessment** derived only from authoritative records (never from a
+provider's say-so), which keeps four situations apart that must not be conflated. `status` and `appworks recipe status` show it.
+
+| Assessment | The records say | It does **not** say | Operator action |
+|---|---|---|---|
+| `invocation-outcome-unknown` | a consequential call may have happened and **no result was recorded** (`Invocation(uncertain)`) | whether it happened | `reconcile` looks the operation up by its key (§6.5) |
+| `recorded-unverified` | the provider's **result is recorded** (`Invocation(succeeded)`), the operation is not repeated, but verification found **nothing conclusive** (provider or store unavailable, record not yet visible, no usable evidence) | that the business outcome is right, **or** that it is wrong | `reconcile` re-verifies without invoking (§6.6); if it stays inconclusive, check the provider's authoritative state by hand |
+| `verified` | the result is recorded **and** independent state confirmed the contract's and the recipe's expectations | | none |
+| `business-outcome-unexpected` | independent state **contradicts** the expected result (`Verification(contradicted)`) | that the operation did not run. It may well have executed and produced something else; this is **not** evidence of non-execution. It is not repeated | inspect the provider's state; correct or compensate by hand. The run is final (`failed`) |
+
+A provider's response of success is the *recorded result*, never the verified outcome. `not-executed-confirmed` (§6.5) is reached only
+by the provider's strongly consistent, fenced answer, never by a missing row; `failed-no-effect` only when the call was refused before the
+provider ran. The assessment also reports the latest finding per verification method with its reason, and how many verification recoveries
+have been started.
+
 A `completed` end whose outcome verification is contradicted finishes `failed`; inconclusive finishes `uncertain`. A run never reports
 `completed` without verification having confirmed it.
 
@@ -169,6 +186,12 @@ Any `contradicted` wins over `inconclusive`; `success` requires all `confirmed` 
 `completed` end with `$input` and `$output` the recipe's own input and output. Event-kind methods are corroborating only and never
 establish success.
 
+**Findings are evidence, and only a conclusive one stands in for a new probe.** Each attempt at a method is its own `Verification` record
+(`<run>.<step>.<method>`, then `….try-001`, `….try-002`; the first attempt keeps the id earlier releases used). A `confirmed` or
+`contradicted` finding is reused by a resumed or recovered run. An `inconclusive` finding is not: it established nothing, so the method is probed again,
+and the earlier attempt stays in the record as history. (A run found by an earlier release with an inconclusive record is therefore
+re-verified, never read as verified.) The probe is an observation, so repeating it is always safe; the consequential invocation is never repeated.
+
 Verification is *independent* in the sense AppPort defines: it reads application state through the provider's own observation capability,
 not through the response of the call being verified.
 
@@ -199,8 +222,32 @@ Success is never inferred from the invocation record, and non-execution never fr
 fenced on the run: of two concurrent reconcilers exactly one changes it (the other gets `CONFLICT` or `NOT_RECONCILABLE`). An
 `indeterminate` attempt is history, not a verdict; the run may be reconciled again.
 
-Not covered: a run uncertain because *verification* was inconclusive after a recorded success (the invocation is `succeeded`, so there is no
-lost invocation to look up); it stays uncertain and is for a person.
+A run uncertain because *verification* was inconclusive after a recorded success has no lost invocation to look up; it is recovered by §6.6.
+
+### 6.6 Recovering verification of a recorded result
+
+A run is `recorded-unverified` when a consequential invocation's **result is recorded** and verification then settled nothing: either a step's
+verification (the run took the step's `uncertain` edge) or the recipe's outcome verification at a `completed` end. There is no lost
+invocation to look up, so §6.5 does not apply; the same `reconcile` command recovers it instead.
+
+1. **Claim.** `reconcile` reopens the run where its recorded result lives (the capability step, or the `completed` end) in one transaction fenced on
+   the run, giving the caller a fresh lease token (§8). Of several recoverers one claim wins; the others get `CONFLICT` or `NOT_RECONCILABLE`.
+2. **Verify, nothing else.** The ordinary code then runs: the step is found `succeeded`, so **no invocation is made**, and verification is evaluated with the
+   *recorded* result and the original input (so the identity and key are untouched). Confirmed findings already recorded are reused; inconclusive ones are probed again. The
+   probes are ordinary gateway invocations authorized now (a withdrawn read grant leaves the finding inconclusive, with its reason).
+3. **Outcome, by the recipe's own edges.**
+
+| Verification now | Edge | Result |
+|---|---|---|
+| every method confirmed | `success` | outputs are built and the recipe's outcome verification runs as for any run; `completed` only if it also confirms |
+| any contradicted | `failure` | `failed`, assessment `business-outcome-unexpected` (**not** non-execution; the invoice may exist) |
+| otherwise | `uncertain` | back at the uncertain end, still `recorded-unverified`, with the new attempt's reasons. Repeatable without limit and without effect |
+
+Because the claim leaves the run `running` and owned, a recoverer that dies mid-verification leaves an ordinary recoverable run: any worker may `resume` it after the
+lease expires, and no step of it invokes anything. Nothing here has a second source of truth: the same records, the same transitions, the same fence.
+A stale recoverer cannot record a finding or finish the run (§8); a lookup answer gathered before another settlement cannot overwrite it (§6.5).
+
+Not covered: a run uncertain for a reason that is neither a lost invocation nor an unverified recorded result (it is `unresolved`, for a person).
 
 ## 7. Authority
 
@@ -267,7 +314,7 @@ correct in general, that the contract is published beyond the registry used, or 
 
 * Rules `enum`, `unit`, `encoding`; `preconditions`; event verification: refused at start (`RECIPE_UNSUPPORTED`).
 * Concurrency inside a run (there is none: the recipe has no parallelism), timers and automatic task expiry, notification, assignment to persons.
-* Cancellation and compensation. Reconciliation (§6.5) covers a single lost consequential invocation whose contract declares a lookup; a run that is uncertain because verification was inconclusive, or whose contract declares no lookup, is for a person.
+* Cancellation and compensation. Reconciliation (§6.5) covers a single lost consequential invocation whose contract declares a lookup; a run whose contract declares no lookup is for a person, and so is any run uncertain for a reason §6.5 and §6.6 do not identify.
 * A remote gateway (HTTP transport to providers). `createAppPortGateway` is in-process, over an AppPort registry, and is what the tests use.
 * Recipe locks as a start condition, packages as a source of recipes (Phase 4), a task UI (Phase 5), run listing.
 * Idempotency enforcement by the provider is the provider's; the runtime's guarantee is that it never calls a consequential operation twice for one step.
@@ -293,7 +340,15 @@ in `test/conformance.test.ts` in which the worker is a separate OS process that 
 | B9 | outcome recorded, step not completed | `Invocation(succeeded, output)` | yes, and recorded | yes | continue; **no call** | `completed` | n/a | 1 |
 | B10 | step completed, next step not begun | `StepAttempt(completed)`, run at next step | yes, recorded | yes | continue | `completed` | n/a | 1 |
 | B11 | verification done, terminal state not committed | `Verification` records | yes, recorded | yes | continue; recorded verifications are reused, not redone | `completed` | n/a | 1 |
+| B9a | result recorded; verification found nothing, died before the step took its edge | `Invocation(succeeded)`, `Verification(inconclusive)` | yes, and recorded | yes | continue; **no call**; the inconclusive finding is probed again | `completed` if the evidence is now there, else `uncertain` (recorded-unverified) | via §6.6 | 1 |
+| B11a | probe answered, finding not recorded | `Invocation(succeeded)`, earlier findings only | yes, recorded | yes | continue; the observation is repeated; **no call** | `completed` | n/a | 1 |
+| B11b | verification finished (finding recorded), step not committed | `Verification(confirmed)` | yes, recorded | yes | continue; the finding is reused, nothing probed or called | `completed` | n/a | 1 |
 | B12 | immediately after the terminal commit | `RecipeRun(finished)` | yes, recorded | yes | nothing to do | unchanged (`completed`) | n/a | 1 |
+
+Verification recovery (`test/verification.test.ts`, real processes): a result recorded with verification unavailable, lagging or
+contradicted; recovery by `reconcile` after a crash or without one; the same repeated while still inconclusive; a recoverer killed mid-verification and then resumed by
+several workers; two recoverers at once; a stale verifier; a lookup answer made stale by another settlement. In every case the ledger holds exactly one invoice and the
+step has exactly one invocation.
 
 Stale and concurrent workers (`test/workers.test.ts`): a worker that returns from the provider after its lease was taken over cannot record
 the outcome (`CONFLICT`; the successor's `uncertain` stands); one parked after recording a success cannot complete the step once another

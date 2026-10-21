@@ -25,7 +25,15 @@ export class OperationRefused extends Error {}
 
 export class Ledger {
   /** Faults a test may inject. `loseResponseAfterCommit`: the write commits, then the call fails as a lost connection would. */
-  faults: { loseResponseAfterCommit: boolean; consistency: "strong" | "eventual"; killAt?: "before-commit" | "after-commit" } = { loseResponseAfterCommit: false, consistency: "strong" };
+  faults: {
+    loseResponseAfterCommit: boolean;
+    consistency: "strong" | "eventual";
+    killAt?: "before-commit" | "after-commit";
+    /** Reads used for verification: `unavailable` (the store cannot be reached) or `lagging` (the committed row is not yet visible). Writes are unaffected. */
+    read?: "unavailable" | "lagging";
+    /** After the write commits, the stored row is changed behind the provider's back: its response still says success. */
+    tamperOnCommit?: Partial<InvoiceRow>;
+  } = { loseResponseAfterCommit: false, consistency: "strong" };
   /** Every submit that reached the ledger, committed or not. A second one for the same invoice is a resubmission. */
   attempts: string[] = [];
 
@@ -48,13 +56,20 @@ export class Ledger {
     return (await this.invoices()).find((i) => i.supplierId === supplierId && i.invoiceNumber === invoiceNumber);
   }
 
+  /** The provider-facing read, which verification uses; subject to the injected read faults. */
   async get(id: string): Promise<InvoiceRow | undefined> {
+    if (this.faults.read === "unavailable") throw new Error("ledger read unavailable");
+    if (this.faults.read === "lagging") throw new Error("invoice not yet visible");
+    return this.raw(id);
+  }
+
+  private async raw(id: string): Promise<InvoiceRow | undefined> {
     return ((await this.db.collection("invoices").get(id)) ?? undefined) as unknown as InvoiceRow | undefined;
   }
 
   /** Changes a stored row behind the application's back, as another system or an operator might. */
   async tamper(id: string, patch: Partial<InvoiceRow>): Promise<void> {
-    const row = await this.get(id);
+    const row = await this.raw(id);
     await this.db.collection("invoices").put({ ...row, ...patch } as never, id);
   }
 
@@ -91,6 +106,7 @@ export class Ledger {
     if (this.faults.killAt === "before-commit") process.kill(process.pid, "SIGKILL");
     await this.db.collection("invoices").put(row as never, row.id);
     if (this.faults.killAt === "after-commit") process.kill(process.pid, "SIGKILL");
+    if (this.faults.tamperOnCommit) await this.tamper(row.id, this.faults.tamperOnCommit);
     if (this.faults.loseResponseAfterCommit) throw new Error("connection reset by peer");
     return row;
   }

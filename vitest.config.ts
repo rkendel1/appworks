@@ -20,7 +20,7 @@ export default defineConfig({
     include: ["packages/**/test/**/*.test.ts"],
     // These start real OS processes and kill them. They run alone, in sequence, under vitest.processes.config.ts
     // (`pnpm test` runs both): beside the rest of the suite their processes starve it of CPU and time out its tests.
-    exclude: ["**/node_modules/**", "packages/recipe-runtime/test/conformance.test.ts", "packages/recipe-runtime/test/workers.test.ts"],
+    exclude: ["**/node_modules/**", "packages/recipe-runtime/test/conformance.test.ts", "packages/recipe-runtime/test/workers.test.ts", "packages/recipe-runtime/test/verification.test.ts"],
     environment: "node",
     testTimeout: 20000
   }

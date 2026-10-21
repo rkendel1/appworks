@@ -25,6 +25,8 @@ export interface WorkerSpec {
   ledgerKillAt?: "before-commit" | "after-commit";
   /** Make the ledger's lookup eventually consistent. */
   eventual?: boolean;
+  /** Any other ledger fault (read availability, tampering), fixed for this process. */
+  ledgerFaults?: Record<string, unknown>;
   provider?: "ledger" | "books";
 }
 
@@ -34,6 +36,7 @@ const provider = spec.provider === "books" ? { id: "com.globex.books", names: BO
 const env = await accountingEnvironment(join(spec.dir, "env"), recipe, [provider]);
 if (spec.ledgerKillAt) env.ledger.faults.killAt = spec.ledgerKillAt;
 if (spec.eventual) env.ledger.faults.consistency = "eventual";
+if (spec.ledgerFaults) Object.assign(env.ledger.faults, spec.ledgerFaults);
 
 const runtime = await RecipeRuntime.open({
   home: join(spec.dir, "runtime"),

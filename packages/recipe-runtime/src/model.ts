@@ -93,6 +93,36 @@ export interface HumanTaskRecord {
   closedAt?: string;
 }
 
+/**
+ * What a run's records establish, kept apart so that none is mistaken for another (spec §3.1). A recorded provider result is
+ * not a business outcome, and the absence of one is not proof that nothing happened.
+ */
+export type AssessmentState =
+  | "in-progress"
+  | "waiting"
+  | "verified"
+  | "rejected"
+  | "invocation-outcome-unknown"
+  | "recorded-unverified"
+  | "business-outcome-unexpected"
+  | "not-executed-confirmed"
+  | "failed-no-effect"
+  | "unresolved"
+  | "failed";
+
+export interface Assessment {
+  state: AssessmentState;
+  step?: string;
+  invocation?: string;
+  summary: string;
+  /** What the operator can do about it; absent when nothing remains to do. */
+  next?: string;
+  /** The latest finding for each verification method, with why it is not conclusive when it is not. */
+  evidence: Array<{ stepId: string; methodId: string; source: string; result: string; reason?: string }>;
+  /** How many times verification recovery has been started on this run. */
+  rechecks: number;
+}
+
 export type Resolution = "confirmed-completed" | "confirmed-not-executed" | "indeterminate";
 
 export interface ReconciliationRecord {
