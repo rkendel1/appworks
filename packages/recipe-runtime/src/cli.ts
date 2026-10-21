@@ -1,0 +1,142 @@
+#!/usr/bin/env node
+/**
+ * `appworks recipe run | status | resume` (spec/runtime-1.md §10). The environment module is the operator's: it is the one
+ * place that says where providers are and which grants exist. A recipe names none of that.
+ *
+ *   appworks recipe run <recipe.json> --input <json|@file> --environment <module> [--principal <name>] [--home <dir>] [--json]
+ *   appworks recipe status <run> [--home <dir>] [--json]
+ *   appworks recipe resume <run> --environment <module> [--home <dir>] [--json]
+ *
+ * Exit status: 0 completed, 10 rejected, 11 failed, 12 uncertain, 20 waiting for a human task, 2 usage, 1 refused or error.
+ * Answering a human task has no command yet (spec §12): `status` lists what is pending.
+ */
+import { readFileSync, realpathSync } from "node:fs";
+import { homedir, userInfo } from "node:os";
+import { join, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { permissiveAuthority, unavailableGateway, type CapabilityGateway, type RuntimeAuthority } from "./gateway.js";
+import { RecipeRuntime, type RunView } from "./engine.js";
+import { RuntimeError } from "./model.js";
+
+export interface LoadedEnvironment {
+  gateway: CapabilityGateway;
+  authority?: RuntimeAuthority;
+  close?(): Promise<void> | void;
+}
+
+export interface CliIO {
+  out(text: string): void;
+  err(text: string): void;
+}
+
+export interface CliEnvironment {
+  /** Loads an environment module; defaults to importing it. Tests inject one. */
+  load?(modulePath: string, context: { home: string }): Promise<LoadedEnvironment>;
+  now?: () => number;
+}
+
+const USAGE = `usage:
+  appworks recipe run <recipe.json> --input <json|@file> --environment <module> [--principal <name>] [--home <dir>] [--json]
+  appworks recipe status <run> [--home <dir>] [--json]
+  appworks recipe resume <run> --environment <module> [--home <dir>] [--json]
+exit: 0 completed, 10 rejected, 11 failed, 12 uncertain, 20 waiting for a task, 2 usage, 1 refused or error`;
+
+const EXIT = { completed: 0, rejected: 10, failed: 11, uncertain: 12 } as const;
+
+function parse(args: string[]): { positional: string[]; options: Record<string, string | true> } {
+  const positional: string[] = [];
+  const options: Record<string, string | true> = {};
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!;
+    if (!arg.startsWith("--")) positional.push(arg);
+    else {
+      const key = arg.slice(2);
+      const next = args[i + 1];
+      if (key === "json" || next === undefined || next.startsWith("--")) options[key] = true;
+      else {
+        options[key] = next;
+        i++;
+      }
+    }
+  }
+  return { positional, options };
+}
+
+async function defaultLoad(modulePath: string, context: { home: string }): Promise<LoadedEnvironment> {
+  const loaded = (await import(pathToFileURL(resolve(modulePath)).href)) as { default?: (context: { home: string }) => LoadedEnvironment | Promise<LoadedEnvironment> };
+  if (typeof loaded.default !== "function") throw new RuntimeError("INVARIANT", `${modulePath} must default-export a function returning { gateway, authority?, close? }`);
+  return loaded.default(context);
+}
+
+function describe(run: RunView): string[] {
+  const lines = [`run ${run.id}: ${run.status}${run.outcome ? ` / ${run.outcome}` : ""}${run.interrupted ? " (interrupted: its worker's lease expired; resume takes it over)" : ""}`, `  recipe: ${run.recipeId} ${run.recipeDigest}`];
+  if (run.endStep) lines.push(`  ended at: ${run.endStep}${run.reason ? ` (${run.reason})` : ""}`);
+  else lines.push(`  at step: ${run.currentStep}`);
+  if (run.output !== undefined) lines.push(`  output: ${JSON.stringify(run.output)}`);
+  for (const i of run.invocations) lines.push(`  ${i.purpose === "verification" ? "probe" : "invoke"} ${i.stepId} [${i.effect}] ${i.status}${i.classification ? ` (${i.classification})` : ""}${i.cause ? ` cause=${i.cause}` : ""}`);
+  for (const v of run.verifications) lines.push(`  verify ${v.stepId}/${v.methodId} (${v.source}): ${v.result}${v.reason ? ` - ${v.reason}` : ""}`);
+  for (const t of run.tasks) lines.push(`  task ${t.stepId} for ${t.role}${t.approval ? " (approval)" : ""}: ${t.status}${t.answeredBy ? ` by ${t.answeredBy}` : ""}`);
+  return lines;
+}
+
+const exitFor = (run: RunView): number => (run.status === "waiting" ? 20 : run.outcome ? EXIT[run.outcome] : 1);
+
+export async function main(argv: string[], io: CliIO = { out: (t) => process.stdout.write(`${t}\n`), err: (t) => process.stderr.write(`${t}\n`) }, environment: CliEnvironment = {}): Promise<number> {
+  const args = argv[0] === "recipe" ? argv.slice(1) : argv;
+  const [command, ...rest] = args;
+  if (command !== "run" && command !== "status" && command !== "resume") {
+    io.err(USAGE);
+    return 2;
+  }
+  const { positional, options } = parse(rest);
+  const target = positional[0];
+  if (!target) {
+    io.err(USAGE);
+    return 2;
+  }
+  const home = resolve(String(options["home"] ?? process.env["APPWORKS_RECIPE_HOME"] ?? join(homedir(), ".appworks", "recipe-runs")));
+  const needsEnvironment = command !== "status";
+  const modulePath = typeof options["environment"] === "string" ? options["environment"] : undefined;
+  if (needsEnvironment && !modulePath) {
+    io.err("--environment <module> is required: a recipe names no provider, so the operator says where they are");
+    return 2;
+  }
+  let loaded: LoadedEnvironment | undefined;
+  let runtime: RecipeRuntime | undefined;
+  try {
+    loaded = needsEnvironment ? await (environment.load ?? defaultLoad)(modulePath!, { home }) : undefined;
+    runtime = await RecipeRuntime.open({ home, gateway: loaded?.gateway ?? unavailableGateway, authority: loaded?.authority ?? permissiveAuthority, ...(environment.now ? { now: environment.now } : {}) });
+    let run: RunView;
+    if (command === "run") {
+      const recipe = JSON.parse(readFileSync(resolve(target), "utf8")) as unknown;
+      const raw = options["input"];
+      if (typeof raw !== "string") {
+        io.err("--input <json|@file> is required");
+        return 2;
+      }
+      const input = JSON.parse(raw.startsWith("@") ? readFileSync(resolve(raw.slice(1)), "utf8") : raw) as unknown;
+      run = await runtime.start(recipe, input, typeof options["principal"] === "string" ? options["principal"] : userInfo().username);
+    } else if (command === "resume") run = await runtime.resume(target);
+    else run = await runtime.status(target);
+    io.out(options["json"] === true ? JSON.stringify(run, null, 2) : describe(run).join("\n"));
+    return command === "status" && run.status === "running" ? 0 : exitFor(run);
+  } catch (error) {
+    const e = error as RuntimeError;
+    io.err(options["json"] === true ? JSON.stringify({ error: { code: e.code ?? "ERROR", message: e.message, ...(e.details ? { details: e.details } : {}) } }) : `${e.code ?? "error"}: ${e.message}`);
+    return 1;
+  } finally {
+    await runtime?.close();
+    await loaded?.close?.();
+  }
+}
+
+const invoked = process.argv[1]
+  ? (() => {
+      try {
+        return realpathSync(process.argv[1]!) === realpathSync(fileURLToPath(import.meta.url));
+      } catch {
+        return false;
+      }
+    })()
+  : false;
+if (invoked) void main(process.argv.slice(2)).then((code) => (process.exitCode = code));

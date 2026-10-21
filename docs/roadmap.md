@@ -128,6 +128,12 @@ crash injected after each of push and PR-create produces no duplicate.
 
 ### Phase 3: Recipe compiler and runtime (the critical path for outcome A)
 
+> **Status (feat/recipe-runtime):** 3.1 (`spec/runtime-1.md`), 3.2, 3.3 (subset: `copy`/`const`/`compute`; others refused), 3.4, 3.5 (API only), 3.6 and
+> 3.8 (`run`/`status`/`resume`; no `answer`) are implemented in `@appport/recipe-runtime` and tested against the supplier-invoice recipe and a
+> persisted test ledger, including the lost-response and crash cases. 3.7 is partial: the provider and fault injection exist, but the contract is
+> still the example's illustrative one, registered only in the test registry, not published. Still open before the Phase 3 exit: the kill-at-
+> every-step-boundary matrix (three points are covered), reconciliation of `uncertain` runs, a remote gateway, and a published contract.
+
 Design constraints (from the charter and `spec/recipe-1.md`): no embedded code, closed vocabulary, uncertainty never retried
 implicitly, recipes name capabilities not providers, a lock grants nothing. Reuse AppPort resolution/invocation and FeltDB; do **not**
 reuse or fork the transformation workflow in `packages/workspace`.

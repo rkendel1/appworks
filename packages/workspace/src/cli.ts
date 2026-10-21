@@ -4,7 +4,8 @@
  * are @appport/extraction's command, unchanged; `project` and `serve` act on the workspace through the same action table
  * (`perform`) and the same project view the web workspace uses. There is one workflow implementation.
  *
- *   appworks project create --github <owner>/<repo> [--ref <ref>] [--read-credential env:NAME] [--write-credential env:NAME]
+ *   appworks recipe run|status|resume ...                     (see @appport/recipe-runtime)
+  appworks project create --github <owner>/<repo> [--ref <ref>] [--read-credential env:NAME] [--write-credential env:NAME]
  *   appworks project create --git <url-or-mirror> --owner <owner> --name <repo> [--ref <ref>] [--url <canonical url>]
  *   appworks project list [--json]
  *   appworks project show <id> [--json]
@@ -206,6 +207,16 @@ function exitFor(error: unknown, io: CliIO, ran: boolean): number {
 /** Runs the CLI. Returns the exit status; never calls `process.exit`. */
 export async function main(argv: string[], io: CliIO = { out: (t) => process.stdout.write(`${t}\n`), err: (t) => process.stderr.write(`${t}\n`) }, environment: CliEnvironment = {}): Promise<number> {
   const [command, ...rest] = argv;
+  // `recipe` belongs to the recipe runtime. It is reached by a lazy import through an optional peer dependency, so the
+  // workspace takes no hard dependency on it and shares no state with it.
+  if (command === "recipe") {
+    const runtime = await import("@appport/recipe-runtime/cli").catch(() => undefined);
+    if (!runtime) {
+      io.err("appworks recipe needs @appport/recipe-runtime, which is not installed");
+      return 1;
+    }
+    return runtime.main(rest, io);
+  }
   if (command !== "project" && command !== "serve" && command !== "agent") return extractionMain(argv, io);
   let ws: Workspace | undefined;
   let ran = false;

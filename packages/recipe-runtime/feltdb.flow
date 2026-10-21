@@ -1,0 +1,107 @@
+flow_version 1
+
+// The AppWorks recipe runtime: its durable records (spec/runtime-1.md §2).
+// This file is authoritative. The runtime deploys it into FeltDB when it opens a home and refuses any write to a
+// collection or field it does not declare.
+
+app appworks_recipe_runtime {
+  collection RecipeRun {
+    id: text
+    recipeId: text
+    recipeDigest: text
+    recipe: json
+    input: json
+    principal: text
+    status: enum(running, waiting, finished)
+    outcome: enum(completed, rejected, failed, uncertain)?
+    endStep: text?
+    reason: text?
+    currentStep: text
+    data: json
+    output: json?
+    owner: text?
+    leaseExpiresAt: datetime?
+    events: integer
+    createdAt: datetime
+    updatedAt: datetime
+    finishedAt: datetime?
+    index recipeId using hash(recipeId)
+    index status using hash(status)
+  }
+
+  collection StepAttempt {
+    id: text
+    runId: text
+    stepId: text
+    kind: enum(capability, decision, transform, task, end)
+    status: enum(started, waiting, completed)
+    route: text?
+    next: text?
+    startedAt: datetime
+    finishedAt: datetime?
+    index runId using hash(runId)
+  }
+
+  collection Invocation {
+    id: text
+    runId: text
+    stepId: text
+    purpose: enum(step, verification)
+    ordinal: integer
+    dependency: text
+    effect: enum(observation, consequential)
+    idempotencyKey: text
+    inputDigest: text
+    input: json
+    status: enum(intent, succeeded, failed, uncertain, abandoned)
+    classification: enum(success, pre-effect, effect-unknown)?
+    provider: json?
+    output: json?
+    error: json?
+    cause: text?
+    startedAt: datetime
+    finishedAt: datetime?
+    index runId using hash(runId)
+  }
+
+  collection Verification {
+    id: text
+    runId: text
+    stepId: text
+    methodId: text
+    source: enum(contract, recipe, outcome)
+    result: enum(confirmed, contradicted, inconclusive)
+    invocation: text?
+    checks: json
+    reason: text?
+    at: datetime
+    index runId using hash(runId)
+  }
+
+  collection HumanTask {
+    id: text
+    runId: text
+    stepId: text
+    role: text
+    approval: boolean
+    purpose: text
+    present: json
+    status: enum(pending, answered, unanswered)
+    response: json?
+    answeredBy: text?
+    createdAt: datetime
+    closedAt: datetime?
+    index runId using hash(runId)
+  }
+
+  collection RunEvent {
+    id: text
+    runId: text
+    seq: integer
+    type: text
+    stepId: text?
+    at: datetime
+    detail: json
+    index runId using hash(runId)
+  }
+}

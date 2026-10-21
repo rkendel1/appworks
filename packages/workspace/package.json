@@ -49,6 +49,15 @@
     "appworks": "./dist/cli.js"
   },
   "devDependencies": {
-    "@appport/sdk": "1.2.2"
+    "@appport/sdk": "1.2.2",
+    "@appport/recipe-runtime": "workspace:*"
+  },
+  "peerDependencies": {
+    "@appport/recipe-runtime": "workspace:*"
+  },
+  "peerDependenciesMeta": {
+    "@appport/recipe-runtime": {
+      "optional": true
+    }
   }
 }

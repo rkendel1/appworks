@@ -29,8 +29,8 @@ environment (AppPort `fulfillment-1` §5); the recipe does not change when an im
 | AppPort core | registration, discovery, resolution, bindings, authorization integration, invocation | `@appport/core` (appport) |
 | Recipe source and package model | process structure, decisions, transformations, control flow, tasks, verification, dependency declarations, locks, packages | `@appport/recipe` (appworks) |
 | Distribution boundary | recipe package ↔ `distribution/1` release manifest; consumer-side acceptance of acquired bytes | `@appport/recipe-distribution` (appworks) |
-| Recipe compiler (future) | validated source → deterministic executable representation | not implemented |
-| Recipe runtime (future) | durable execution through core's invocation, authorization and verification; task persistence; outcome aggregation | not implemented |
+| Recipe compiler (future) | validated source → deterministic executable representation | not implemented (the runtime interprets source) |
+| Recipe runtime | durable execution through core's invocation, authorization and verification; task persistence; outcome aggregation | `@appport/recipe-runtime`, first slice (`spec/runtime-1.md`) |
 | Distribution Protocol | signed releases, registry-independent product identity, resolution, acquisition, content verification, receipts | `@distribution-protocol/*` (distribution-protocol) |
 
 ```

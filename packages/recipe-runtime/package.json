@@ -1,0 +1,48 @@
+{
+  "name": "@appport/recipe-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AppWorks recipe runtime: durable execution of validated appport.recipe/1 recipes through AppPort capabilities, with FeltDB-backed state, invocation-time authorization, independent verification and explicit uncertain outcomes.",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rkendel1/appworks.git",
+    "directory": "packages/recipe-runtime"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./cli": {
+      "types": "./dist/cli.d.ts",
+      "import": "./dist/cli.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "feltdb.flow",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "tsc -b --clean"
+  },
+  "bin": {
+    "appworks-recipe": "./dist/cli.js"
+  },
+  "dependencies": {
+    "@appport/core": "1.3.0",
+    "@appport/protocol": "1.2.0",
+    "@appport/recipe": "workspace:*",
+    "@appport/schema": "1.1.1",
+    "@feltdb/core": "0.12.0"
+  }
+}
