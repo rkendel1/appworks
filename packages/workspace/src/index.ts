@@ -11,7 +11,7 @@ export { Workspace, SimulatedCrash, type WorkspaceOptions, type Started } from "
 export { proposeAdoption, adoptionProblems, ADOPTION_FORMAT, type ContractAdoption, type Difference } from "./adoption.js";
 export { buildPromotion, promotionProblems, patchDigest, readPromotionPlan, PROMOTION_FORMAT, type Promotion, type PromotionPlan } from "./promotion.js";
 export { perform, ACTIONS, RUN_ACTIONS, IMMEDIATE_ACTIONS, type Performed } from "./actions.js";
-export { projectView, advise, type ProjectView, type NextAction } from "./view.js";
+export { projectView, advise, noEntryPoints, type ProjectView, type NextAction } from "./view.js";
 export { createWorkspaceServer, projectSummary, parseRepository, type ServerOptions } from "./server.js";
 export { renderPage, pageSecurityHeaders, verifyVendoredStackUi } from "./ui.js";
 export { main, openWorkspace, commandEnvironment, type CliEnvironment } from "./cli.js";

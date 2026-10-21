@@ -61,7 +61,7 @@ export interface ProjectView {
   /** Installing AppPort, for a revision without an integration: the proposal and, once approved and applied, the install. */
   installation?: { state: "proposed" | "installed"; artifact: string; digest: string; directory: string; application: { id: string; name: string; version: string }; packages: Record<string, string>; port: number; upstream?: string; capabilities: Array<{ name: string; method: string; path: string; description: string; source: string; evidence: Array<{ path: string; line: number; quote: string }> }>; files: Array<{ path: string; role: string; sha256: string }>; description: string; install?: { artifact: string; worktree: string; patch: string; verified: boolean; discovery?: { origin?: string; state?: string; capabilities: number } } };
   discovery?: { outcome: DiscoveryRecord["outcome"]; endpoint?: string; at: string; state?: string; reasons: string[]; application?: DiscoveryRecord["application"]; capabilities: DiscoveryRecord["capabilities"]; established: DiscoveryRecord["established"]; note: string; artifact: string };
-  assessment?: { digest: string; artifact: string; fileDigest: string; partial: string[]; coverage: { filesSeen: number; filesAnalyzed: number }; candidates: number; recommendation?: string; questions: number };
+  assessment?: { digest: string; artifact: string; fileDigest: string; partial: string[]; coverage: { filesSeen: number; filesAnalyzed: number }; candidates: number; recommendation?: string; questions: number; findings: Array<{ code: string; severity: string; message: string }> };
   inventory?: InventoryRecord & { artifact: string };
   /** The reviewed extractions this workspace has, and whether their candidate is in this project's assessment. */
   extractions: Array<{ name: string; candidate: string; identity: string; inThisAssessment: boolean }>;
@@ -164,7 +164,7 @@ export async function projectView(ws: Workspace, principal: Principal, id: strin
   const assessment = await ws.artifact<ApplicationAssessment>(principal, p.current.assessment);
   if (assessment) {
     const a = assessment.body;
-    view.assessment = { digest: a.digest, artifact: assessment.record.id, fileDigest: assessment.record.fileDigest, partial: a.coverage.partial ? a.coverage.partialReasons : [], coverage: { filesSeen: a.coverage.filesSeen, filesAnalyzed: a.coverage.filesAnalyzed }, candidates: a.candidates.length, ...(a.recommendation?.candidate ? { recommendation: a.recommendation.candidate } : {}), questions: a.questions.length };
+    view.assessment = { digest: a.digest, artifact: assessment.record.id, fileDigest: assessment.record.fileDigest, partial: a.coverage.partial ? a.coverage.partialReasons : [], coverage: { filesSeen: a.coverage.filesSeen, filesAnalyzed: a.coverage.filesAnalyzed }, candidates: a.candidates.length, ...(a.recommendation?.candidate ? { recommendation: a.recommendation.candidate } : {}), questions: a.questions.length, findings: a.findings.map((f) => ({ code: f.code, severity: f.severity, message: f.message })) };
   }
   const inventory = await ws.artifact<InventoryRecord>(principal, p.current.inventory);
   if (inventory) view.inventory = { ...inventory.body, artifact: inventory.record.id };
@@ -223,8 +223,21 @@ export async function projectView(ws: Workspace, principal: Principal, id: strin
       reasons: record?.reasons ?? []
     };
   }
+  const empty = noEntryPoints(view);
+  if (empty && !failed && p.condition.state !== "cancelled" && !active) view.status = { tone: "attention", label: "No extractable entry points", detail: empty.reasons[0] ?? "nothing to extract" };
   view.next = advise(view);
   return view;
+}
+
+/**
+ * Whether the recorded evidence says there is nothing here to extract: the assessment found no candidates and discovery found no capabilities.
+ * Derived from the records alone and decides nothing: the workflow still checks every action. It is a state to read, not a failure: nothing went wrong.
+ */
+export function noEntryPoints(v: ProjectView): { reasons: string[] } | undefined {
+  if (v.project.stage !== "assessment-completed" || !v.assessment || v.assessment.candidates > 0) return undefined;
+  if ((v.discovery?.capabilities.length ?? 0) > 0) return undefined;
+  const reasons = v.assessment.findings.filter((f) => f.code === "NO_ENTRY_POINTS").map((f) => f.message);
+  return { reasons: [...reasons, "discovery found no capabilities", `assessed ${v.assessment.coverage.filesAnalyzed} of ${v.assessment.coverage.filesSeen} files`] };
 }
 
 /** Explains the project's state and lists what can be done next. Advisory only. */
@@ -279,7 +292,8 @@ export function advise(v: ProjectView): ProjectView["next"] {
       if (v.integration?.status === "present") add("discover", "Discover at a given origin", "only if the application runs somewhere the source does not say", { inputs: [{ name: "endpoint", label: "Application origin", required: true }] });
       break;
     case "assessment-completed":
-      add("reconcile", "Reconcile inventory", "match discovered capabilities with assessed candidates, with graded evidence");
+      // With no candidate and nothing discovered, reconciling would only join two empty sets and every later stage needs a candidate.
+      if (!noEntryPoints(v)) add("reconcile", "Reconcile inventory", "match discovered capabilities with assessed candidates, with graded evidence");
       break;
     case "inventory-reconciled":
     case "candidate-selected": {
@@ -359,6 +373,8 @@ export function advise(v: ProjectView): ProjectView["next"] {
       ? `The integration change is applied to an isolated worktree and verified for exactly the extraction's subject${v.integrationChange?.commit ? `, and committed locally (${v.integrationChange.commit.slice(0, 12)})` : ""}. Review the patch; nothing has been pushed or deployed.`
       : p.stage === "ready-for-promotion"
       ? "Verified for exactly this revision, contract, adapter, declaration and runtime. Promotion needs its own approval; no deployment contract exists here."
+      : noEntryPoints(v)
+      ? `Nothing to extract: ${noEntryPoints(v)!.reasons.join("; ")}. The assessor reads Go and Protocol Buffers entry points; a revision without any (a proxy with one catch-all route, a library) cannot go further, and nothing went wrong. Choose a revision with entry points, or cancel to keep this record.`
       : `At ${p.stage}${p.condition.state === "partial" ? `, with gaps: ${p.condition.reasons.map((r) => r.code).join(", ")}` : ""}.`;
   return { summary, actions, note };
 }

@@ -10,13 +10,16 @@
 // That deployment is the test's environment, not the workspace's: the workspace only discovers it by its origin.
 // Needs Go, Node >= 22.13 and the built packages (pnpm build). Takes several minutes.
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import { buildPromotion, environmentCredentials, githubProvider, gitProvider, listExtractions, localAuthority, main, projectView, treeHash, Workspace, type ContractAdoption, type Principal, type Promotion, type PromotionRecord } from "../src/index.js";
 
+// The Memos bridge starts only if `import.meta.url === file://${process.argv[1]}`. Node resolves the first to a real path and leaves the
+// second as given, so under a symlinked temp directory (macOS: /var -> /private/var) the bridge exits 0 without starting. Work under real paths.
+const TMP = realpathSync(tmpdir());
 const SOURCE = process.env.APPWORKS_MEMOS_REPO ? resolve(process.env.APPWORKS_MEMOS_REPO) : undefined;
 const ENABLED = process.env.APPWORKS_MEMOS_E2E === "1" && SOURCE !== undefined;
 const PINNED = "e0ce8569589b2eccafd13e262ea3e320251858f2";
@@ -51,7 +54,7 @@ describe.skipIf(!ENABLED)("Memos e0ce856, end to end through the workspace", () 
       timeoutMs: 30_000
     });
 
-    const home = mkdtempSync(join(tmpdir(), "e2e-workspace-"));
+    const home = mkdtempSync(join(TMP, "e2e-workspace-"));
     const ws = await Workspace.open({ home, authority: localAuthority({ [OPERATOR.id]: ["*"] }), credentials: environmentCredentials(process.env), providers: { github: githubProvider(), git: gitProvider() }, extractionsRoot: EXTRACTIONS, runnerTimeoutMs: 30 * 60_000 });
     const run = async (name: string, input: Record<string, unknown> = {}) => (await ws.dispatch(OPERATOR, id, name, input)).done;
     let id = "";

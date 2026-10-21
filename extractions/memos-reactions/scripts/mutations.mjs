@@ -87,11 +87,13 @@ for (const mutant of MUTANTS) {
   cpSync(join(source, "contract.json"), join(dir, "contract.json"));
   const target = join(dir, "runtime", mutant.file);
   writeFileSync(target, mutant.patch(readFileSync(target, "utf8")));
-  const run = spawnSync(process.execPath, ["--no-warnings", "--import", join(here, "runtime", "register.mjs"), "--test", "--test-concurrency=1", join(here, "test", "behavior.test.mjs")], {
+  const run = spawnSync(process.execPath, ["--no-warnings", "--import", join(here, "runtime", "register.mjs"), "--test", "--test-concurrency=1", "--test-reporter=tap", join(here, "test", "behavior.test.mjs")], {
     cwd: here,
     env: { ...process.env, MEMOS_REPO: repo, MEMOS_BIN: build, APPWORKS_HOST_DIR: join(dir, "runtime"), APPWORKS_VERIFICATION_OUT: "" },
     encoding: "utf8"
   });
+  // The reporter is pinned: this parses TAP, and Node's default reporter for piped output differs between versions (tap on 22, spec on 24),
+  // so without it a newer Node reports every mutant as surviving, and an older one could not tell.
   const failed = [...run.stdout.matchAll(/^not ok \d+ - (.+)$/gm)].map((m) => m[1]);
   const missed = mutant.caughtBy.filter((name) => !failed.includes(name));
   const killed = run.status !== 0 && missed.length === 0;
