@@ -65,6 +65,9 @@ export class SimulatedCrash extends Error {
   }
 }
 
+/** The scanner an assessment was made with, read from its own recorded configuration. */
+export const scannerOf = (assessment: Pick<ApplicationAssessment, "configuration">): 1 | 2 => (assessment.configuration.scanner === "appport.assessment-scanner/2" ? 2 : 1);
+
 /** A step that has been claimed: its run id, and the promise of its result. */
 export interface Started {
   run: string;
@@ -549,11 +552,28 @@ export class Workspace {
     });
   }
 
-  /** Static assessment of the same pinned revision with @appport/assessment. Partial coverage stays visible. */
-  assess(principal: Principal, id: string, resuming = false): Promise<Started> {
-    return this.begin(principal, id, "assess", { stage: startsFrom("assess"), resuming }, async ({ project: p, run }) => {
+  /**
+   * Static assessment of the same pinned revision with @appport/assessment. Partial coverage stays visible.
+   *
+   * The scanner is an explicit input (`scanner`: 1 or 2), recorded on the run (so a resumed run uses it again) and in the assessment itself
+   * (`configuration.scanner`, covered by its digest). It is never chosen by what a scanner finds: with no input, the project keeps the scanner
+   * of the assessment it already has, and a first assessment uses scanner 1. Assessing again is allowed from the stages before a plan exists, and
+   * only to change the scanner: the new assessment becomes the current evidence, the inventory and selection made from the old one are cleared
+   * (as for any rerun), and the old assessment stays in the store and in the run history.
+   */
+  assess(principal: Principal, id: string, input: { scanner?: unknown } = {}, resuming = false): Promise<Started> {
+    const asked = input.scanner === undefined || input.scanner === "" ? undefined : String(input.scanner);
+    if (asked !== undefined && asked !== "1" && asked !== "2") return Promise.reject(new WorkspaceError("INVALID_INPUT", `scanner is 1 or 2 (got ${JSON.stringify(input.scanner)})`));
+    // Refused before any run is claimed (a mistaken request is not a failed run): assessing again with the scanner the project already has changes nothing.
+    const guard = async (p: Project) => {
+      const current = p.current.assessment ? await this.body<ApplicationAssessment>(p.current.assessment, "assessment") : undefined;
+      if (current && !resuming && (asked ? Number(asked) : scannerOf(current.body)) === scannerOf(current.body)) throw new WorkspaceError("INVALID_INPUT", `the project is already assessed with scanner ${scannerOf(current.body)}; assessing again would change nothing and clear the inventory and selection. Choose the other scanner to assess again`);
+    };
+    return this.begin(principal, id, "assess", { stage: startsFrom("assess"), input: asked ? { scanner: asked } : {}, resuming, guard }, async ({ project: p, run }) => {
       const checkout = this.assertRevision(p);
-      const assessment = assessRepository(checkout);
+      const current = p.current.assessment ? await this.body<ApplicationAssessment>(p.current.assessment, "assessment") : undefined;
+      const scanner: 1 | 2 = asked ? (Number(asked) as 1 | 2) : current ? scannerOf(current.body) : 1;
+      const assessment = assessRepository(checkout, { scanner });
       const verified = verifyAssessment(assessment, { repository: checkout });
       if (!verified.ok) throw new WorkspaceError("ASSESSMENT_INVALID", `the assessment does not verify: ${[...new Set(verified.findings.map((f) => f.code))].join(", ")}`);
       if (assessment.target.revision !== p.revision!.sha) throw new WorkspaceError("REVISION_MISMATCH", `the assessment is of ${assessment.target.revision}, not ${p.revision!.sha}`);
@@ -990,7 +1010,7 @@ export class Workspace {
       case "discover":
         return this.discover(principal, id, s("endpoint") ? { endpoint: s("endpoint")! } : {}, resuming);
       case "assess":
-        return this.assess(principal, id, resuming);
+        return this.assess(principal, id, { scanner: input["scanner"] }, resuming);
       case "reconcile":
         return this.reconcile(principal, id, resuming);
       case "select":

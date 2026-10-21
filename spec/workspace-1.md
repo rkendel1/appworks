@@ -52,7 +52,7 @@ The stages, in order (`workflow transformation` in `feltdb.flow`; each step's `t
 | `propose-integration` | `integration-inspected` (re-run at `integration-proposed`) | no AppPort integration in the revision | an AppPort installation proposal (§4a) and its digest; nothing written |
 | `install-integration` | `integration-proposed` | re-deriving the proposal gives the same digest; a `modify-integration` approval of it; the pinned checkout unchanged; the destination clean | the files in an isolated worktree, the patch, the package install, the integration started and discovered; the approval consumed. Not verified: failed, evidence kept, approval unused |
 | `discover` | `integration-inspected`, `integration-installed` (re-run at `capabilities-discovered`) | as above | outcome `discovered`, `no-integration` or `unavailable`; capabilities, interfaces, claims; how the origin was found (given, probed from the source, or the installed integration started) |
-| `assess` | `capabilities-discovered` | as above; the assessment verifies and names the pinned SHA | assessment reference and digest; partial coverage |
+| `assess` `[scanner]` | `capabilities-discovered`; to assess again, `assessment-completed`, `inventory-reconciled` or `candidate-selected` (§4b) | as above; the assessment verifies and names the pinned SHA; assessing again must name the other scanner | assessment reference and digest; partial coverage |
 | `reconcile` | `assessment-completed` (re-run until a candidate is planned) | current assessment and discovery | inventory (§5) |
 | `select` | `inventory-reconciled` (re-run until approval) | the candidate is in the current assessment and eligible (`candidateRefusals`) | selection decision |
 | `plan` | `candidate-selected`, `awaiting-approval` | exactly one reviewed extraction plan names the candidate; `createExtraction` accepts it without results (contract, mapping, adapter, fulfillment declaration, runtime, revision) | the validated proposal, digest |
@@ -121,6 +121,24 @@ A revision without an AppPort integration can get one before discovery, so that 
 * **Discovery** of an installed integration starts it from its worktree for the discovery and stops it after.
 * Nothing is committed or pushed. A promotion still targets an isolated worktree of the pinned revision: carrying an extracted
   capability into the newly installed integration is not done yet.
+
+## 4b. The scanner of an assessment
+
+`assess` takes an optional `scanner` (`1` or `2`; `appworks project assess <id> --scanner 2`, or a form on the page). Scanner 1 (Go and Protocol Buffers, format
+`appport.application-assessment/1`) is the default; scanner 2 also reads HTTP routes in JavaScript and TypeScript (`/2`, `spec/assessment-1.md` §11). The
+choice is **never inferred from what a scanner finds**: a repository with both RPCs and HTTP routes is assessed by the scanner named, and a repository with nothing
+for scanner 1 stays assessed by scanner 1 until a person assesses it again.
+
+* **Recorded in three places:** the run's `input` (so a resumed run uses it again), the assessment's own `configuration.scanner` (covered by its digest, so provenance
+  cannot differ from what ran) and the project view (`assessment.scanner`), which the CLI and the page both show.
+* **No project-level setting.** The assessment on record says which scanner the project uses. With no `scanner` named, assessing keeps that scanner.
+* **Assessing again** is explicit, allowed only before a plan exists, and only to change the scanner: assessing with the scanner the project already has is refused before
+  any run is claimed (it would change nothing and clear what was made from the assessment; a refused request is not a failed run). The new assessment becomes the current
+  evidence; the inventory and selection made from the old one are cleared, as for any rerun; the old assessment stays in the store and the run history shows both.
+* **The advisor** offers scanner 2 only where scanner 1's recorded coverage shows JavaScript or TypeScript it did not analyze, says what it would change, and offers the way
+  back from scanner 2. It never claims scanner 2 support while scanner 1 is selected. Extractions reviewed against scanner 1 record that assessment's digest.
+* **The agent** may make the first assessment and has no scanner input; assessing again is a person's decision.
+* HTTP routes remain unselectable (`CANDIDATE_NOT_RPC`): a scanner-2 assessment makes them visible, not extractable.
 
 ## 5. Reconciliation
 

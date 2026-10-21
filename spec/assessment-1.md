@@ -256,8 +256,8 @@ Scanner 1 (above) reads Go and Protocol Buffers and writes `/1`. **Scanner 2** (
 `http` operation `{ kind, method, path, framework, placeholders }`, the `http-route` entry point, the `route-inline` and
 `route-handler-reference` links and the `js-static` collection method. Scanner 1 output is unchanged byte for byte, so every existing assessment
 (and every extraction that records one's digest) reproduces; a reader refuses a `/1` document that uses anything `/2` adds, and a document whose
-scanner does not match its format. Scanner 2 is chosen explicitly (`assessRepository(path, { scanner: 2 })`, `appworks assess --scanner 2`); the default is scanner 1, and the workspace does not
-select scanner 2 yet, so a workspace project is assessed with scanner 1 (`docs/compatibility.md`).
+scanner does not match its format. Scanner 2 is chosen explicitly (`assessRepository(path, { scanner: 2 })`, `appworks assess --scanner 2`); the default is scanner 1, and a workspace project is assessed with the
+scanner a person names, recorded in the assessment and never inferred (`spec/workspace-1.md` §4b).
 
 What is read (`src/js.ts`, `src/http.ts`): a tokenizer (strings, templates, regular expressions, comments) and a recognizer over its tokens.
 Receivers are recognized **by how they are declared** (`express()`, `express.Router()`, `Router()`, `new Router()`, `fastify()`, `new Hono()`,

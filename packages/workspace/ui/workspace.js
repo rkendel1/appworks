@@ -420,6 +420,7 @@
       out.push(section('assessment', 'Assessment', a ? [
         a.partial.length ? S.dom.Unavailable({ status: 'partial', title: 'Partial assessment', reason: 'Not covered: ' + a.partial.join(', ') + '. ' + a.coverage.filesAnalyzed + ' of ' + a.coverage.filesSeen + ' files analyzed.' }) : null,
         S.dom.MetadataList({ items: [
+          { label: 'Scanner', value: 'Scanner ' + a.scanner + (a.scanner === 2 ? ': Go, Protocol Buffers, and HTTP routes in JavaScript and TypeScript' : ': Go and Protocol Buffers') },
           { label: 'Digest', value: a.digest, mono: true },
           { label: 'Artifact', value: a.artifact, mono: true, hint: 'File ' + a.fileDigest },
           { label: 'Candidates', value: a.candidates },
