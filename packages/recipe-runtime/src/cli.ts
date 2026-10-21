@@ -77,6 +77,10 @@ async function defaultLoad(modulePath: string, context: { home: string }): Promi
 
 function describe(run: RunView): string[] {
   const lines = [`run ${run.id}: ${run.status}${run.outcome ? ` / ${run.outcome}` : ""}${run.interrupted ? " (interrupted: its worker's lease expired; resume takes it over)" : ""}`, `  recipe: ${run.recipeId} ${run.recipeDigest}`];
+  lines.push(`  assessment: ${run.assessment.state} - ${run.assessment.summary}`);
+  for (const e of run.assessment.evidence.filter((x) => x.result !== "confirmed")) lines.push(`    ${e.stepId}/${e.methodId} (${e.source}): ${e.result}${e.reason ? ` - ${e.reason}` : ""}`);
+  if (run.assessment.next) lines.push(`  next: ${run.assessment.next}`);
+  if (run.assessment.rechecks) lines.push(`  verification recoveries so far: ${run.assessment.rechecks}`);
   if (run.endStep) lines.push(`  ended at: ${run.endStep}${run.reason ? ` (${run.reason})` : ""}`);
   else lines.push(`  at step: ${run.currentStep}`);
   if (run.output !== undefined) lines.push(`  output: ${JSON.stringify(run.output)}`);
