@@ -61,7 +61,7 @@ export interface ProjectView {
   /** Installing AppPort, for a revision without an integration: the proposal and, once approved and applied, the install. */
   installation?: { state: "proposed" | "installed"; artifact: string; digest: string; directory: string; application: { id: string; name: string; version: string }; packages: Record<string, string>; port: number; upstream?: string; capabilities: Array<{ name: string; method: string; path: string; description: string; source: string; evidence: Array<{ path: string; line: number; quote: string }> }>; files: Array<{ path: string; role: string; sha256: string }>; description: string; install?: { artifact: string; worktree: string; patch: string; verified: boolean; discovery?: { origin?: string; state?: string; capabilities: number } } };
   discovery?: { outcome: DiscoveryRecord["outcome"]; endpoint?: string; at: string; state?: string; reasons: string[]; application?: DiscoveryRecord["application"]; capabilities: DiscoveryRecord["capabilities"]; established: DiscoveryRecord["established"]; note: string; artifact: string };
-  assessment?: { digest: string; artifact: string; fileDigest: string; partial: string[]; coverage: { filesSeen: number; filesAnalyzed: number }; candidates: number; recommendation?: string; questions: number; findings: Array<{ code: string; severity: string; message: string }> };
+  assessment?: { digest: string; artifact: string; fileDigest: string; partial: string[]; coverage: { filesSeen: number; filesAnalyzed: number }; candidates: number; recommendation?: string; questions: number; findings: Array<{ code: string; severity: string; message: string }>; /** How many candidates are RPCs and how many are HTTP routes. */ operations: { rpc: number; http: number }; /** The scanner this assessment was made with, from its own recorded configuration. */ scanner: 1 | 2; /** Languages the repository holds, and whether this scanner analyzed them. */ languages: Array<{ language: string; files: number; supported: boolean }> };
   inventory?: InventoryRecord & { artifact: string };
   /** The reviewed extractions this workspace has, and whether their candidate is in this project's assessment. */
   extractions: Array<{ name: string; candidate: string; identity: string; inThisAssessment: boolean }>;
@@ -164,7 +164,7 @@ export async function projectView(ws: Workspace, principal: Principal, id: strin
   const assessment = await ws.artifact<ApplicationAssessment>(principal, p.current.assessment);
   if (assessment) {
     const a = assessment.body;
-    view.assessment = { digest: a.digest, artifact: assessment.record.id, fileDigest: assessment.record.fileDigest, partial: a.coverage.partial ? a.coverage.partialReasons : [], coverage: { filesSeen: a.coverage.filesSeen, filesAnalyzed: a.coverage.filesAnalyzed }, candidates: a.candidates.length, ...(a.recommendation?.candidate ? { recommendation: a.recommendation.candidate } : {}), questions: a.questions.length, findings: a.findings.map((f) => ({ code: f.code, severity: f.severity, message: f.message })) };
+    view.assessment = { digest: a.digest, artifact: assessment.record.id, fileDigest: assessment.record.fileDigest, partial: a.coverage.partial ? a.coverage.partialReasons : [], coverage: { filesSeen: a.coverage.filesSeen, filesAnalyzed: a.coverage.filesAnalyzed }, candidates: a.candidates.length, ...(a.recommendation?.candidate ? { recommendation: a.recommendation.candidate } : {}), questions: a.questions.length, findings: a.findings.map((f) => ({ code: f.code, severity: f.severity, message: f.message })), operations: { rpc: a.candidates.filter((c) => c.operation.kind === "rpc").length, http: a.candidates.filter((c) => c.operation.kind === "http").length }, scanner: a.configuration.scanner === "appport.assessment-scanner/2" ? 2 : 1, languages: a.coverage.languages.map((l) => ({ language: l.language, files: l.files, supported: l.supported })) };
   }
   const inventory = await ws.artifact<InventoryRecord>(principal, p.current.inventory);
   if (inventory) view.inventory = { ...inventory.body, artifact: inventory.record.id };
@@ -229,6 +229,12 @@ export async function projectView(ws: Workspace, principal: Principal, id: strin
   return view;
 }
 
+/** Scanner 1 was used and the repository holds JavaScript or TypeScript it did not analyze: what scanner 2 would read. From the recorded coverage, not from what was found. */
+export function scannerTwoWouldRead(v: ProjectView): number {
+  if (v.assessment?.scanner !== 1) return 0;
+  return v.assessment.languages.filter((l) => (l.language === "javascript" || l.language === "typescript") && !l.supported).reduce((n, l) => n + l.files, 0);
+}
+
 /**
  * Whether the recorded evidence says there is nothing here to extract: the assessment found no candidates and discovery found no capabilities.
  * Derived from the records alone and decides nothing: the workflow still checks every action. It is a state to read, not a failure: nothing went wrong.
@@ -238,6 +244,19 @@ export function noEntryPoints(v: ProjectView): { reasons: string[] } | undefined
   if ((v.discovery?.capabilities.length ?? 0) > 0) return undefined;
   const reasons = v.assessment.findings.filter((f) => f.code === "NO_ENTRY_POINTS").map((f) => f.message);
   return { reasons: [...reasons, "discovery found no capabilities", `assessed ${v.assessment.coverage.filesAnalyzed} of ${v.assessment.coverage.filesSeen} files`] };
+}
+
+/** The inventory is reconciled, candidates exist, and none is one extraction can take. Derived from the records alone. */
+export function nothingExtractable(v: ProjectView): boolean {
+  return v.project.stage === "inventory-reconciled" && Boolean(v.assessment?.candidates) && !(v.inventory?.candidates.some((c) => c.readiness === "exposure-candidate") ?? false);
+}
+
+/**
+ * A selected candidate no reviewed extraction exists for. Extraction needs a contract, an adapter and a behavioral suite that people
+ * reviewed; the workspace does not generate them, so `plan` would only fail. Derived from the records alone.
+ */
+export function noReviewedPlan(v: ProjectView): boolean {
+  return v.project.stage === "candidate-selected" && Boolean(v.selection) && !v.extractions.some((e) => e.candidate === v.selection!.candidate);
 }
 
 /** Explains the project's state and lists what can be done next. Advisory only. */
@@ -300,8 +319,10 @@ export function advise(v: ProjectView): ProjectView["next"] {
       const extractable = v.inventory?.candidates.filter((c) => c.readiness === "exposure-candidate") ?? [];
       const reviewed = v.extractions.find((e) => e.inThisAssessment)?.candidate;
       const suggested = reviewed ?? v.assessment?.recommendation;
+      // Selecting is refused for a candidate extraction cannot take; offering it would only lead to the refusal.
+      if (p.stage === "inventory-reconciled" && !extractable.length) break;
       add("select", p.stage === "candidate-selected" ? "Select another candidate" : "Select candidate", `${extractable.length} candidates are classified exposure-candidate`, { inputs: [{ name: "candidate", label: "Candidate id", required: true, ...(suggested ? { value: suggested } : {}), hint: reviewed ? "pre-filled: the candidate with a reviewed extraction" : "pre-filled: the assessment's recommendation" }, { name: "rationale", label: "Rationale", required: false }] });
-      if (p.stage === "candidate-selected") add("plan", "Validate extraction plan", "validate the reviewed plan for the selected candidate with the extraction library (no code is generated)");
+      if (p.stage === "candidate-selected" && !noReviewedPlan(v)) add("plan", "Validate extraction plan", "validate the reviewed plan for the selected candidate with the extraction library (no code is generated)");
       break;
     }
     case "extraction-planned":
@@ -367,14 +388,31 @@ export function advise(v: ProjectView): ProjectView["next"] {
       break;
     }
   }
+  // Assessing again, with the other scanner, is offered wherever the flow allows it (before a plan exists). Never automatic: it replaces the current evidence.
+  if (["assessment-completed", "inventory-reconciled", "candidate-selected"].includes(p.stage) && v.assessment) {
+    const input = (value: string) => [{ name: "scanner", label: "Scanner", required: true, value, hint: "1 or 2" }];
+    const consequence = "The new assessment becomes the current evidence; the inventory and selection made from this one are cleared; this assessment stays in the record.";
+    if (v.assessment.scanner === 1 && scannerTwoWouldRead(v))
+      add("assess", "Re-assess with scanner 2", `scanner 1 read only Go and Protocol Buffers and did not analyze ${scannerTwoWouldRead(v)} JavaScript/TypeScript files. Scanner 2 also reads HTTP routes registered in them (Express, Fastify, Koa router, Hono, NestJS). Routes can be assessed but not extracted yet, and an extraction reviewed against scanner 1 records that assessment's digest. ${consequence}`, { inputs: input("2") });
+    else if (v.assessment.scanner === 2)
+      add("assess", "Re-assess with scanner 1", `return to scanner 1 (Go and Protocol Buffers only), the scanner reviewed extractions were made against. ${consequence}`, { inputs: input("1") });
+  }
   if (!["ready-for-promotion", "ready-for-review", "submitted-for-review"].includes(p.stage)) add("cancel", "Cancel project", "stop and keep the record", { inputs: [{ name: "reason", label: "Reason", required: false }] });
   const summary =
     p.stage === "ready-for-review"
       ? `The integration change is applied to an isolated worktree and verified for exactly the extraction's subject${v.integrationChange?.commit ? `, and committed locally (${v.integrationChange.commit.slice(0, 12)})` : ""}. Review the patch; nothing has been pushed or deployed.`
       : p.stage === "ready-for-promotion"
       ? "Verified for exactly this revision, contract, adapter, declaration and runtime. Promotion needs its own approval; no deployment contract exists here."
+      : nothingExtractable(v)
+      ? `${v.assessment!.candidates} candidates were found${v.assessment!.operations.http ? ` (${v.assessment!.operations.http} HTTP routes, ${v.assessment!.operations.rpc} RPCs)` : ""} and none can be extracted yet. Extraction takes a Protocol Buffers RPC that the assessment classifies as an exposure candidate, and has no way to derive a contract, an adapter and a behavioral suite for ${v.assessment!.operations.http ? "an HTTP route" : "anything else"}. The candidates are the application's surface as the source shows it: read them in the assessment. Cancel to keep this record.`
+      : noReviewedPlan(v)
+      ? `${v.selection!.candidate} is selected, and no reviewed extraction exists for it. An extraction needs a contract, an adapter and a behavioral suite that people have reviewed, and the workspace does not generate them yet, so nothing past selection can run for this candidate. Select a candidate with a reviewed extraction, or cancel to keep this record.`
       : noEntryPoints(v)
-      ? `Nothing to extract: ${noEntryPoints(v)!.reasons.join("; ")}. The assessor reads Go and Protocol Buffers entry points; a revision without any (a proxy with one catch-all route, a library) cannot go further, and nothing went wrong. Choose a revision with entry points, or cancel to keep this record.`
+      ? `Nothing to extract: ${noEntryPoints(v)!.reasons.join("; ")}. ${
+          v.assessment!.scanner === 2
+            ? "Scanner 2 reads Protocol Buffers services and HTTP routes registered in JavaScript or TypeScript (Express, Fastify, Koa router, Hono, NestJS)"
+            : `Scanner 1 reads Protocol Buffers services and Go entry points${scannerTwoWouldRead(v) ? `; this repository has ${scannerTwoWouldRead(v)} JavaScript or TypeScript files it did not read, and re-assessing with scanner 2 (offered below) reads the HTTP routes registered in them` : ""}`
+        }. A revision without any entry point (a proxy with one catch-all route, a library, an application in another language) cannot go further, and nothing went wrong. Choose a revision with entry points, or cancel to keep this record.`
       : `At ${p.stage}${p.condition.state === "partial" ? `, with gaps: ${p.condition.reasons.map((r) => r.code).join(", ")}` : ""}.`;
   return { summary, actions, note };
 }

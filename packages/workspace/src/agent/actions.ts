@@ -161,6 +161,8 @@ function workflowAction(step: string): ActionDefinition {
       if (!live(view) || p.activeRun || p.condition.state === "failed") return false;
       if (step === "propose-integration" && view.integration?.status !== "absent") return false;
       if (step === "commit") return p.stage === "ready-for-review" && Boolean(view.integrationChange && !view.integrationChange.commit);
+      // Assessing again changes the scanner and clears the inventory and selection made from the first assessment: a person's decision, not the agent's.
+      if (step === "assess") return p.stage === "capabilities-discovered";
       const s = STEPS[step];
       return Boolean(s && [...s.from, ...s.rerun].includes(p.stage));
     },

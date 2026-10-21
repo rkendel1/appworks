@@ -12,7 +12,7 @@
  *   appworks project list [--json]
  *   appworks project show <id> [--json]
  *   appworks project <action> <id> [--<input> <value> ...]
- *        actions: acquire pin inspect discover [--endpoint] assess reconcile select --candidate [--rationale] plan
+ *        actions: acquire pin inspect discover [--endpoint] assess [--scanner 1|2] reconcile select --candidate [--rationale] plan
  *                 request-approval approval-subject --action approve --action --subject execute verify ready
  *                 assert-match --capability --candidate --rationale cancel [--reason] resume
  *                 pull-request --head --base | commit | push | promote | modify-integration
@@ -133,7 +133,7 @@ function showText(v: ProjectView): string[] {
   for (const r of p.condition.reasons) lines.push(`  ${r.code}: ${r.message}`);
   if (v.integration) lines.push(`  integration: ${v.integration.status}${v.integration.integrations.length ? ` (${v.integration.integrations.map((i) => i.root).join(", ")})` : ""}`);
   if (v.discovery) lines.push(`  discovery: ${v.discovery.outcome}${v.discovery.endpoint ? ` at ${v.discovery.endpoint}` : ""}: ${v.discovery.capabilities.map((c) => `${c.name}@${c.version}`).join(", ") || "none"}; nothing invoked or granted`);
-  if (v.assessment) lines.push(`  assessment: ${v.assessment.digest}${v.assessment.partial.length ? ` (partial: ${v.assessment.partial.join(", ")})` : ""}; ${v.assessment.candidates} candidates`);
+  if (v.assessment) lines.push(`  assessment: ${v.assessment.digest} (scanner ${v.assessment.scanner})${v.assessment.partial.length ? ` (partial: ${v.assessment.partial.join(", ")})` : ""}; ${v.assessment.candidates} candidates`);
   if (v.inventory) {
     const s = v.inventory.summary;
     lines.push(`  inventory: ${s.confirmed} confirmed, ${s.probable} probable, ${s.ambiguous} ambiguous, ${s.unresolved} unresolved; ${s.candidates} candidates (${s.exposed} exposed, ${s.notExposed} not exposed, ${s.unknown} unknown)`);

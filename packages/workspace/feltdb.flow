@@ -251,6 +251,7 @@ app appworks_workspace {
     }
     step assess {
       from capabilities-discovered
+      rerun assessment-completed inventory-reconciled candidate-selected
       to assessment-completed
       evidence assessment
     }
