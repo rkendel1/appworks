@@ -21,8 +21,8 @@ import { Ledger } from "./ledger.js";
 import { ledgerProvider, type ProviderNames } from "./provider.js";
 
 export const CONSUMER = "org.appworks.recipe-runtime";
-export const LEDGER_NAMES: ProviderNames = { duplicate: "ledger.duplicates", get: "ledger.read", submit: "ledger.post" };
-export const BOOKS_NAMES: ProviderNames = { duplicate: "books.lookup", get: "books.fetch", submit: "books.record" };
+export const LEDGER_NAMES: ProviderNames = { duplicate: "ledger.duplicates", get: "ledger.read", submit: "ledger.post", resolve: "ledger.resolve" };
+export const BOOKS_NAMES: ProviderNames = { duplicate: "books.lookup", get: "books.fetch", submit: "books.record", resolve: "books.resolve" };
 
 type Provider = ReturnType<typeof ledgerProvider>;
 
@@ -46,7 +46,7 @@ export async function accountingEnvironment(dir: string, recipe: RecipeSource, p
     served[spec.id] = ledgerProvider(spec.id, accountingContract(), ledgers[spec.id]!, spec.names);
     await register(served[spec.id]!.app);
   }
-  const consumer = await register(defineApplication({ identity: { id: CONSUMER, name: "AppWorks recipe runtime", version: "1.0.0" }, provides: [], requires: consumerRequirements(recipe) }));
+  const consumer = await register(defineApplication({ identity: { id: CONSUMER, name: "AppWorks recipe runtime", version: "1.0.0" }, provides: [], requires: consumerRequirements(recipe, [{ contract: CONTRACT, capability: "invoice.operation.resolve" }]) }));
 
   const grants = new MemoryAuthorizationGrantStore();
   const subject = (provider: string, capabilityName: string) => ({ consumerId: consumer.id, providerId: provider, capabilityName, capabilityVersion: 1 });

@@ -24,6 +24,8 @@ import { permissiveAuthority, type CapabilityGateway, type GatewayResult, type R
 import {
   RuntimeError,
   type HumanTaskRecord,
+  type ReconciliationRecord,
+  type Resolution,
   type InvocationRecord,
   type RecipeRunRecord,
   type RunEventRecord,
@@ -31,13 +33,23 @@ import {
   type StepAttemptRecord,
   type VerificationRecord
 } from "./model.js";
-import { declaredStateMethods } from "./contract.js";
+import { declaredStateMethods, reconciliationFor } from "./contract.js";
 import { applyRules } from "./rules.js";
 import { Store, type Write } from "./store.js";
 import { unsupportedConstructs } from "./support.js";
 
 /** Points at which a test may stop the runtime as a crash would (spec §8). A hook that throws leaves the records as they are. */
-export type RuntimePoint = "invoke:intent-recorded" | "invoke:returned" | "step:committed";
+export type RuntimePoint =
+  | "run:starting"
+  | "run:created"
+  | "invoke:prepared"
+  | "invoke:intent-recorded"
+  | "invoke:returned"
+  | "invoke:outcome-recorded"
+  | "task:waiting"
+  | "step:committed"
+  | "verify:completed"
+  | "run:finished";
 
 export interface RuntimeOptions {
   /** Directory holding the runtime's FeltDB state. */
@@ -68,6 +80,7 @@ export interface RunView {
   invocations: Array<Pick<InvocationRecord, "id" | "stepId" | "purpose" | "effect" | "status" | "classification" | "idempotencyKey" | "provider" | "cause" | "error">>;
   verifications: Array<Pick<VerificationRecord, "stepId" | "methodId" | "source" | "result" | "reason">>;
   tasks: Array<Pick<HumanTaskRecord, "stepId" | "role" | "approval" | "status" | "answeredBy" | "response" | "present">>;
+  reconciliations: Array<Pick<ReconciliationRecord, "stepId" | "operationKey" | "resolution" | "reason" | "by" | "at">>;
   events: number;
 }
 
@@ -84,6 +97,13 @@ export class RecipeRuntime {
   private readonly worker: string;
   private readonly leaseMs: number;
   private readonly now: () => number;
+  /**
+   * The lease token this runtime holds for each run it is driving. A claim writes a fresh token as the run's `owner`; every
+   * authoritative write is based on a read of the run that still shows that token (`loadOwned`), and is fenced on that read's
+   * version. A worker whose lease was taken over therefore fails at its next write, even though a fresh read of the run's
+   * version would otherwise let it through.
+   */
+  private readonly tokens = new Map<string, string>();
 
   private constructor(
     private readonly store: Store,
@@ -101,6 +121,21 @@ export class RecipeRuntime {
 
   close(): Promise<void> {
     return this.store.close();
+  }
+
+  /** A new lease token for this worker on `runId`; remembered so the claim's holder can recognize its own lease. */
+  private claim(runId: string): string {
+    const token = `${this.worker}/${randomUUID()}`;
+    this.tokens.set(runId, token);
+    return token;
+  }
+
+  /** Loads the run for a write that only the current lease holder may make; a lost lease aborts the worker without writing. */
+  private async loadOwned(runId: string): Promise<Versioned<RecipeRunRecord>> {
+    const run = await this.load(runId);
+    const mine = this.tokens.get(runId);
+    if (run.status !== "running" || !mine || run.owner !== mine) throw new RuntimeError("CONFLICT", `${runId}: this worker no longer holds the run (${run.status}, held by ${run.owner ?? "nobody"}); it stops and writes nothing`);
+    return run;
   }
 
   private iso(): string {
@@ -124,8 +159,9 @@ export class RecipeRuntime {
     if (!checked.ok) throw new RuntimeError("INPUT_INVALID", `the input does not match the recipe: ${checked.issues.map((i) => `${i.path} ${i.message}`).join("; ")}`, { issues: checked.issues });
 
     const at = this.iso();
+    const runId = `run-${randomUUID()}`;
     const run: RecipeRunRecord = {
-      id: `run-${randomUUID()}`,
+      id: runId,
       recipeId: recipe.id,
       recipeDigest: digestOf(recipe as never),
       recipe,
@@ -134,16 +170,18 @@ export class RecipeRuntime {
       status: "running",
       currentStep: recipe.start,
       data: { input: input as JsonValue, steps: {} },
-      owner: this.worker,
+      owner: this.claim(runId),
       leaseExpiresAt: this.lease(),
       events: 1,
       createdAt: at,
       updatedAt: at
     };
+    await this.options.hook?.("run:starting", { run: run.id, step: run.currentStep });
     await this.store.commit([
       { collection: "RecipeRun", id: run.id, value: run, create: true },
       this.event(run.id, 1, "run.started", undefined, { recipe: run.recipeDigest, principal })
     ]);
+    await this.options.hook?.("run:created", { run: run.id, step: run.currentStep });
     return this.drive(run.id);
   }
 
@@ -151,8 +189,9 @@ export class RecipeRuntime {
   async resume(runId: string): Promise<RunView> {
     const run = await this.load(runId);
     if (run.status === "finished" || run.status === "waiting") return this.view(runId);
-    if (run.owner !== this.worker && run.leaseExpiresAt && Date.parse(run.leaseExpiresAt) > this.now()) throw new RuntimeError("RUN_LEASED", `${runId} is held by ${run.owner} until ${run.leaseExpiresAt}`);
-    await this.store.commit([this.runWrite(run, { owner: this.worker, leaseExpiresAt: this.lease() }), this.event(runId, run.events + 1, "run.resumed", undefined, { worker: this.worker, previous: run.owner ?? null })]);
+    if (run.owner && run.owner !== this.tokens.get(runId) && run.leaseExpiresAt && Date.parse(run.leaseExpiresAt) > this.now()) throw new RuntimeError("RUN_LEASED", `${runId} is held by ${run.owner} until ${run.leaseExpiresAt}`);
+    // The takeover is a fenced write on the version just read: of several workers resuming together, one claim wins.
+    await this.store.commit([this.runWrite(run, { owner: this.claim(runId), leaseExpiresAt: this.lease() }), this.event(runId, run.events + 1, "run.resumed", undefined, { worker: this.worker, previous: run.owner ?? null })]);
     return this.drive(runId);
   }
 
@@ -173,6 +212,113 @@ export class RecipeRuntime {
     const { run, task, step } = await this.pendingTask(runId, stepId);
     if (!(await this.authority.canAnswer(principal, task.role))) throw new RuntimeError("AUTHORITY_DENIED", `${principal} may not close a task for ${task.role}`);
     await this.closeTask(run, task, step, "unanswered", step.unanswered, run.data, {}, { route: "unanswered", by: principal });
+    return this.drive(runId);
+  }
+
+  /**
+   * Reconciles an `uncertain` run whose consequential invocation's outcome was lost (spec §6.5). It looks up the original
+   * operation by its durable key through the contract's declared lookup, never submits anything, and:
+   * - when the provider reports the operation recorded **and** independent verification confirms it, reopens the run at the
+   *   step's `success` edge, so outputs and outcome verification still run;
+   * - when the provider reports it absent with the guarantees the contract declares (strong consistency, key fenced),
+   *   reopens the run at the step's `failure` edge;
+   * - otherwise records an `indeterminate` reconciliation and leaves the run uncertain.
+   * Only the transition is authoritative, and it is fenced on the run: of two concurrent reconcilers exactly one wins.
+   */
+  async reconcile(runId: string, principal: string): Promise<RunView> {
+    const run = await this.load(runId);
+    if (!(await this.authority.canReconcile?.(principal, run.recipeId))) throw new RuntimeError("AUTHORITY_DENIED", `${principal} may not reconcile ${run.recipeId}`);
+    if (run.status !== "finished" || run.outcome !== "uncertain") throw new RuntimeError("NOT_RECONCILABLE", `${runId} is ${run.status}${run.outcome ? ` / ${run.outcome}` : ""}; only a finished, uncertain run is reconciled`);
+    const uncertain = (await this.store.list<InvocationRecord>("Invocation", { runId })).filter((i) => i.purpose === "step" && i.status === "uncertain");
+    if (uncertain.length !== 1) throw new RuntimeError("NOT_RECONCILABLE", `${runId} has ${uncertain.length} uncertain invocations; this run is uncertain for another reason (for example, verification could not run) and only a single lost invocation is reconciled`);
+    const invocation = uncertain[0]!;
+    const step = run.recipe.steps.find((s) => s.id === invocation.stepId) as CapabilityStep;
+    const toUncertain = run.recipe.steps.find((s) => s.id === step.on.uncertain);
+    if (toUncertain?.kind !== "end" || run.endStep !== toUncertain.id || step.on.success === toUncertain.id || step.on.failure === toUncertain.id) throw new RuntimeError("NOT_RECONCILABLE", `${step.id}'s uncertain edge must lead directly to its own end for the run to be reopened`);
+    const dependency = run.recipe.requires.find((d) => d.id === step.uses)!;
+    const target = dependency.target as { contract: string; capability: string };
+    const existing = (await this.store.list<ReconciliationRecord>("Reconciliation", { runId })).filter((r) => r.stepId === step.id);
+    const n = existing.length + 1;
+    const id = `${runId}.${step.id}.${n}`;
+
+    const environment = await this.options.gateway.snapshot([dependency]);
+    const declaration = reconciliationFor(environment.contracts?.[target.contract], target.capability, dependency.versionConstraint);
+    let resolution: Resolution = "indeterminate";
+    let reason: string | undefined;
+    let evidence: JsonValue = {};
+    let lookupId: string | undefined;
+    let outcome: JsonValue | undefined;
+    if (!declaration) {
+      reason = `contract ${target.contract} declares no way to look up ${target.capability} by operation; the outcome stays with the operator`;
+    } else {
+      const lookupDependency = { id: "(reconciliation)", relationship: "invokes", target: { contract: target.contract, capability: declaration.capability }, required: true, versionConstraint: String(declaration.version) } as RecipeSource["requires"][number];
+      const key = "wf1-" + digestOf({ reconcile: invocation.id, ordinal: n } as never).replace(/^sha256:/, "");
+      const result = await this.call(lookupDependency, { [declaration.keyField]: invocation.idempotencyKey } as JsonValue, key, `${id}.lookup`);
+      lookupId = `${runId}.${step.id}.r${n}`;
+      const at = this.iso();
+      const probe: InvocationRecord = {
+        id: lookupId, runId, stepId: step.id, purpose: "reconciliation", ordinal: n, dependency: lookupDependency.id, effect: "observation", idempotencyKey: key,
+        inputDigest: digestOf({ [declaration.keyField]: invocation.idempotencyKey } as never), input: { [declaration.keyField]: invocation.idempotencyKey } as JsonValue, startedAt: at, finishedAt: at,
+        ...(result.kind === "success"
+          ? { status: "succeeded" as const, classification: "success" as const, provider: result.provider as unknown as JsonValue, output: result.output }
+          : { status: "failed" as const, classification: result.kind === "failed" ? ("effect-unknown" as const) : ("pre-effect" as const), error: { code: result.kind, message: "message" in result ? result.message : (result as { reason: string }).reason } })
+      };
+      await this.store.commit([{ collection: "Invocation", id: probe.id, value: probe, create: true }]);
+      if (result.kind !== "success") {
+        reason = `the lookup did not return (${result.kind}); nothing is established`;
+      } else {
+        const found = result.output as { state?: string; output?: JsonValue; consistency?: string; fenced?: boolean };
+        evidence = found as JsonValue;
+        if (found.state === "recorded") {
+          const checked = fromJSONSchema(step.expects.output as never).validate(found.output);
+          if (!checked.ok) reason = `the lookup reports the operation recorded, but its output does not match the step's contract: ${checked.issues.map((i) => i.message).join("; ")}`;
+          else {
+            const dependencyContract = target.contract;
+            const methods = [
+              ...declaredStateMethods(environment.contracts?.[dependencyContract], target.capability, dependency.versionConstraint).map((m) => ({ id: m.id, source: "contract" as const, probe: { capability: m.via.capability, input: m.via.input }, expect: m.expect })),
+              ...(step.verify?.additional ?? []).map((m: RecipeStateVerification) => ({ id: m.id, source: "recipe" as const, probe: { uses: m.via.uses, input: m.via.input }, expect: m.expect }))
+            ];
+            // The lookup says it was recorded; success is declared only if the business state independently confirms it.
+            const verdict = await this.verify(run, `${step.id}.reconciliation-${n}`, methods, { input: invocation.input, output: found.output as JsonValue }, dependencyContract, false);
+            if (verdict === "confirmed") {
+              resolution = "confirmed-completed";
+              outcome = found.output as JsonValue;
+            } else reason = `the lookup reports the operation recorded, but verification was ${verdict}; not declared complete`;
+          }
+        } else if (found.state === "absent") {
+          if (declaration.absenceConclusive && found.consistency === "strong" && found.fenced === true) resolution = "confirmed-not-executed";
+          else reason = `the operation was not found, but ${declaration.absenceConclusive ? "the provider did not report strong consistency with the key fenced" : "the contract does not guarantee that absence means non-execution"}; it may still arrive or may be invisible`;
+        } else reason = `the lookup returned an unknown state`;
+      }
+    }
+
+    const record: ReconciliationRecord = { id, runId, stepId: step.id, invocation: invocation.id, operationKey: invocation.idempotencyKey, resolution, ...(lookupId ? { lookup: lookupId } : {}), evidence, ...(reason ? { reason } : {}), by: principal, at: this.iso() };
+    const fresh = await this.load(runId); // the authoritative transition is fenced on the run as it is now
+    if (fresh.status !== "finished" || fresh.outcome !== "uncertain" || fresh.__version !== run.__version) throw new RuntimeError("CONFLICT", `${runId} changed while it was being reconciled (another reconciliation or worker); nothing was changed`);
+    if (resolution === "indeterminate") {
+      await this.store.commit([{ collection: "Reconciliation", id, value: record, create: true }, this.runWrite(fresh, {}), this.event(runId, fresh.events + 1, "reconciliation.indeterminate", step.id, { reason: reason ?? "" })]);
+      return this.view(runId);
+    }
+    const success = resolution === "confirmed-completed";
+    const next = success ? step.on.success : step.on.failure;
+    const at = this.iso();
+    const attempt = await this.store.get<StepAttemptRecord>("StepAttempt", `${runId}.${step.id}`);
+    const { __version: iv, ...inv } = (await this.store.get<InvocationRecord>("Invocation", invocation.id))!;
+    const writes: Write[] = [
+      { collection: "Reconciliation", id, value: record, create: true },
+      { collection: "Invocation", id: invocation.id, value: success ? { ...inv, status: "succeeded", classification: "success", output: outcome, cause: "reconciled", finishedAt: at } : { ...inv, status: "failed", cause: "reconciled-not-executed", finishedAt: at }, ifVersion: iv },
+      this.runWrite(fresh, {
+        status: "running", currentStep: next, owner: this.claim(runId), leaseExpiresAt: this.lease(),
+        outcome: null, endStep: null, reason: null, finishedAt: null,
+        data: success ? { ...fresh.data, steps: { ...fresh.data.steps, [step.id]: { output: outcome! } } } : fresh.data
+      }),
+      this.event(runId, fresh.events + 1, "reconciliation.resolved", step.id, { resolution, next })
+    ];
+    if (attempt) {
+      const { __version: av, ...rest } = attempt;
+      writes.push({ collection: "StepAttempt", id: attempt.id, value: { ...rest, route: success ? "reconciled-success" : "reconciled-failure", next, finishedAt: at }, ifVersion: av });
+    }
+    await this.store.commit(writes);
     return this.drive(runId);
   }
 
@@ -204,10 +350,10 @@ export class RecipeRuntime {
   }
 
   /** A fenced update of the run record: only the worker that holds the version it read can commit it. */
-  private runWrite(run: Versioned<RecipeRunRecord>, patch: Partial<Omit<RecipeRunRecord, "owner" | "leaseExpiresAt">> & { owner?: string | null; leaseExpiresAt?: string | null }, eventCount = 1): Write {
+  private runWrite(run: Versioned<RecipeRunRecord>, patch: { [K in keyof RecipeRunRecord]?: RecipeRunRecord[K] | null }, eventCount = 1): Write {
     const { __version, ...rest } = run;
     const merged = { ...rest, ...patch, events: run.events + eventCount, updatedAt: this.iso() } as Record<string, unknown>;
-    for (const key of ["owner", "leaseExpiresAt"]) if (merged[key] === null) delete merged[key];
+    for (const key of Object.keys(merged)) if (merged[key] === null) delete merged[key];
     return { collection: "RecipeRun", id: run.id, value: merged, ifVersion: __version };
   }
 
@@ -215,7 +361,7 @@ export class RecipeRuntime {
     for (;;) {
       const run = await this.load(runId);
       if (run.status !== "running") return this.view(runId);
-      if (run.owner !== this.worker) throw new RuntimeError("RUN_LEASED", `${runId} is held by ${run.owner ?? "another worker"}`);
+      if (run.owner !== this.tokens.get(runId)) throw new RuntimeError("CONFLICT", `${runId} is held by ${run.owner ?? "another worker"}; this worker stops and writes nothing`);
       const step = run.recipe.steps.find((s) => s.id === run.currentStep);
       if (!step) throw new RuntimeError("INVARIANT", `${runId}: no step ${run.currentStep}`);
       const waiting = await this.execute(run, step);
@@ -278,6 +424,7 @@ export class RecipeRuntime {
     writes.push(this.runWrite(run, { status: "finished", outcome, endStep: stepId, ...(reason ? { reason } : {}), ...(output !== undefined ? { output } : {}), finishedAt: at, owner: null, leaseExpiresAt: null }, 1));
     writes.push(this.event(run.id, run.events + 1, "run.finished", stepId, { outcome, ...(reason ? { reason } : {}) }));
     await this.store.commit(writes);
+    await this.options.hook?.("run:finished", { run: run.id, step: stepId });
   }
 
   // ------------------------------------------------------------------------------------------------ human tasks
@@ -301,6 +448,7 @@ export class RecipeRuntime {
     writes.push(this.runWrite(run, { status: "waiting", owner: null, leaseExpiresAt: null }));
     writes.push(this.event(run.id, run.events + 1, "task.waiting", step.id, { role: step.assignee.role }));
     await this.store.commit(writes);
+    await this.options.hook?.("task:waiting", { run: run.id, step: step.id });
     return true;
   }
 
@@ -319,7 +467,7 @@ export class RecipeRuntime {
     const { __version: tv, ...taskRest } = task;
     const writes: Write[] = [
       { collection: "HumanTask", id: task.id, value: { ...taskRest, ...patch, status, closedAt: at }, ifVersion: tv },
-      this.runWrite(run, { status: "running", currentStep: next, data, owner: this.worker, leaseExpiresAt: this.lease() }),
+      this.runWrite(run, { status: "running", currentStep: next, data, owner: this.claim(run.id), leaseExpiresAt: this.lease() }),
       this.event(run.id, run.events + 1, status === "answered" ? "task.answered" : "task.unanswered", step.id, { ...detail, next })
     ];
     if (attempt) {
@@ -341,9 +489,11 @@ export class RecipeRuntime {
     const consequential = step.effect === "consequential";
     const all = (await this.store.list<InvocationRecord>("Invocation", { runId: run.id })).filter((i) => i.stepId === step.id && i.purpose === "step").sort((a, b) => a.ordinal - b.ordinal);
     let current = run;
-    let last = all.at(-1);
+    let last: Versioned<InvocationRecord> | undefined = all.at(-1);
 
-    // Recovery (spec §6.3): an invocation left in `intent` means the previous worker died between deciding to call and recording the outcome.
+    // Recovery (spec §6.3, §13). `intent` is written, durably, before the call is made, and it is all that is written; a
+    // worker found at `intent` may or may not have entered the provider. `prepared` is written earlier and the call is only
+    // ever made after `prepared` has been moved to `intent`, so a worker found at `prepared` provably never dispatched.
     if (last?.status === "intent") {
       if (consequential) {
         last = await this.recordInvocation(current, last, { status: "uncertain", classification: "effect-unknown", cause: "outcome-not-recorded" }, "invocation.uncertain");
@@ -351,7 +501,7 @@ export class RecipeRuntime {
         await this.recordInvocation(current, last, { status: "abandoned", cause: "outcome-not-recorded" }, "invocation.abandoned");
         last = undefined;
       }
-      current = await this.load(run.id);
+      current = await this.loadOwned(run.id);
     }
     if (last?.status === "abandoned") last = undefined;
 
@@ -370,26 +520,41 @@ export class RecipeRuntime {
         // Never sent: nothing can have happened.
         const rejected: InvocationRecord = { ...base, idempotencyKey, status: "failed", classification: "pre-effect", error: { code: "INPUT_INVALID", message: checked.issues.map((i) => i.message).join("; ") }, finishedAt: this.iso() };
         await this.store.commit([...attemptWrites, { collection: "Invocation", id: rejected.id, value: rejected, create: true }, this.runWrite(current, { leaseExpiresAt: this.lease() }), this.event(run.id, current.events + 1, "invocation.rejected", step.id, { code: "INPUT_INVALID" })]);
-        current = await this.load(run.id);
+        current = await this.loadOwned(run.id);
         last = (await this.store.get<InvocationRecord>("Invocation", rejected.id))!;
       } else {
-        const intent: InvocationRecord = { ...base, idempotencyKey, status: "intent" };
-        await this.store.commit([...attemptWrites, { collection: "Invocation", id: intent.id, value: intent, create: true }, this.runWrite(current, { leaseExpiresAt: this.lease() }), this.event(run.id, current.events + 1, "invocation.intent", step.id, { invocation: intent.id, key: idempotencyKey, effect: step.effect })]);
-        await this.options.hook?.("invoke:intent-recorded", { run: run.id, step: step.id });
-        const result = await this.call(dependency, input as JsonValue, idempotencyKey, intent.id);
-        await this.options.hook?.("invoke:returned", { run: run.id, step: step.id });
-        current = await this.load(run.id);
-        const outcome = this.classify(result, consequential);
-        last = await this.recordInvocation(current, (await this.store.get<InvocationRecord>("Invocation", intent.id))!, outcome, `invocation.${outcome.status}`);
-        current = await this.load(run.id);
-        if (result.kind === "success") return this.afterSuccess(current, step, last, result);
+        const prepared: InvocationRecord = { ...base, idempotencyKey, status: "prepared" };
+        await this.store.commit([...attemptWrites, { collection: "Invocation", id: prepared.id, value: prepared, create: true }, this.runWrite(current, { leaseExpiresAt: this.lease() }), this.event(run.id, current.events + 1, "invocation.prepared", step.id, { invocation: prepared.id, key: idempotencyKey, effect: step.effect })]);
+        await this.options.hook?.("invoke:prepared", { run: run.id, step: step.id });
+        current = await this.loadOwned(run.id);
+        last = (await this.store.get<InvocationRecord>("Invocation", prepared.id))!;
       }
+    }
+
+    if (last.status === "prepared") {
+      // The one durable step between "decided" and "called". It is fenced on the invocation and on the run, so a worker
+      // whose lease was taken over cannot dispatch: its write conflicts and it stops.
+      const { __version, ...rest } = last;
+      await this.store.commit([
+        { collection: "Invocation", id: last.id, value: { ...rest, status: "intent" }, ifVersion: __version },
+        this.runWrite(current, { leaseExpiresAt: this.lease() }),
+        this.event(run.id, current.events + 1, "invocation.intent", step.id, { invocation: last.id, key: last.idempotencyKey, effect: step.effect })
+      ]);
+      await this.options.hook?.("invoke:intent-recorded", { run: run.id, step: step.id });
+      const result = await this.call(dependency, last.input, last.idempotencyKey, last.id);
+      await this.options.hook?.("invoke:returned", { run: run.id, step: step.id });
+      current = await this.loadOwned(run.id);
+      const outcome = this.classify(result, consequential);
+      last = await this.recordInvocation(current, (await this.store.get<InvocationRecord>("Invocation", last.id))!, outcome, `invocation.${outcome.status}`);
+      await this.options.hook?.("invoke:outcome-recorded", { run: run.id, step: step.id });
+      current = await this.loadOwned(run.id);
+      if (result.kind === "success") return this.afterSuccess(current, step, last, result);
     } else if (last.status === "succeeded") {
       // A previous worker recorded the success and died before completing the step: nothing is called again.
       return this.afterSuccess(current, step, last, undefined);
     }
 
-    const edge = last!.status === "uncertain" ? "uncertain" : "failure";
+    const edge = last.status === "uncertain" ? "uncertain" : "failure";
     return this.completeCapability(current, step, edge);
   }
 
@@ -476,9 +641,15 @@ export class RecipeRuntime {
    * inconclusive; success needs every method confirmed and at least one method. A recorded verification is reused, so a
    * resumed run does not re-judge what was already established.
    */
-  private async verify(run: Versioned<RecipeRunRecord>, stepId: string, methods: Array<{ id: string; source: "contract" | "recipe" | "outcome"; probe: { capability?: string; uses?: string; input: Record<string, ValueRef> }; expect: StateExpectation[] }>, scope: { input: JsonValue; output: JsonValue }, contract?: string): Promise<Verdict> {
+  private async verify(run: Versioned<RecipeRunRecord>, stepId: string, methods: Array<{ id: string; source: "contract" | "recipe" | "outcome"; probe: { capability?: string; uses?: string; input: Record<string, ValueRef> }; expect: StateExpectation[] }>, scope: { input: JsonValue; output: JsonValue }, contract?: string, owned = true): Promise<Verdict> {
+    // A verification is an append-only observation and cannot change the run; it is still recorded only by the lease holder.
+    const guard = async () => {
+      if (owned) await this.loadOwned(run.id);
+    };
     if (!methods.length) {
+      await guard();
       await this.recordVerification({ id: `${run.id}.${stepId}.none`, runId: run.id, stepId, methodId: "(none)", source: "contract", result: "inconclusive", checks: [], reason: "no verification method is declared, so nothing independent establishes the effect", at: this.iso() }, undefined);
+      await this.options.hook?.("verify:completed", { run: run.id, step: stepId });
       return "inconclusive";
     }
     const verdicts: Verdict[] = [];
@@ -521,11 +692,13 @@ export class RecipeRuntime {
           record = { id, runId: run.id, stepId, methodId: method.id, source: method.source, result: checks.every((c) => c.ok) ? "confirmed" : "contradicted", invocation: probe.id, checks: checks as JsonValue, at };
         }
       }
+      await guard();
       await this.recordVerification(record, probe);
       verdicts.push(record.result);
     }
-    if (verdicts.includes("contradicted")) return "contradicted";
-    return verdicts.every((v) => v === "confirmed") ? "confirmed" : "inconclusive";
+    const verdict: Verdict = verdicts.includes("contradicted") ? "contradicted" : verdicts.every((v) => v === "confirmed") ? "confirmed" : "inconclusive";
+    await this.options.hook?.("verify:completed", { run: run.id, step: stepId });
+    return verdict;
   }
 
   private async recordVerification(record: VerificationRecord, probe: InvocationRecord | undefined): Promise<void> {
@@ -571,7 +744,7 @@ export class RecipeRuntime {
   private async view(runId: string): Promise<RunView> {
     const run = await this.load(runId);
     const by = <T extends { id: string }>(collection: "StepAttempt" | "Invocation" | "Verification" | "HumanTask") => this.store.list<T>(collection, { runId }).then(sorted);
-    const [steps, invocations, verifications, tasks] = await Promise.all([by<StepAttemptRecord>("StepAttempt"), by<InvocationRecord>("Invocation"), by<VerificationRecord>("Verification"), by<HumanTaskRecord>("HumanTask")]);
+    const [steps, invocations, verifications, tasks, reconciliations] = await Promise.all([by<StepAttemptRecord>("StepAttempt"), by<InvocationRecord>("Invocation"), by<VerificationRecord>("Verification"), by<HumanTaskRecord>("HumanTask"), this.store.list<ReconciliationRecord>("Reconciliation", { runId }).then(sorted)]);
     return {
       id: run.id, recipeId: run.recipeId, recipeDigest: run.recipeDigest, status: run.status,
       ...(run.outcome ? { outcome: run.outcome } : {}), ...(run.endStep ? { endStep: run.endStep } : {}), ...(run.reason ? { reason: run.reason } : {}),
@@ -581,6 +754,7 @@ export class RecipeRuntime {
       invocations: invocations.map((i) => ({ id: i.id, stepId: i.stepId, purpose: i.purpose, effect: i.effect, status: i.status, ...(i.classification ? { classification: i.classification } : {}), idempotencyKey: i.idempotencyKey, ...(i.provider ? { provider: i.provider } : {}), ...(i.cause ? { cause: i.cause } : {}), ...(i.error ? { error: i.error } : {}) })),
       verifications: verifications.map((v) => ({ stepId: v.stepId, methodId: v.methodId, source: v.source, result: v.result, ...(v.reason ? { reason: v.reason } : {}) })),
       tasks: tasks.map((t) => ({ stepId: t.stepId, role: t.role, approval: t.approval, status: t.status, ...(t.answeredBy ? { answeredBy: t.answeredBy } : {}), ...(t.response !== undefined ? { response: t.response } : {}), present: t.present })),
+      reconciliations: reconciliations.map((r) => ({ stepId: r.stepId, operationKey: r.operationKey, resolution: r.resolution, ...(r.reason ? { reason: r.reason } : {}), by: r.by, at: r.at })),
       events: run.events
     };
   }

@@ -30,6 +30,9 @@ const invoiceOutput: JSONSchema = {
   properties: { invoiceId: { type: "string" }, invoiceNumber: { type: "string" }, supplierId: { type: "string" }, status: { type: "string", enum: ["submitted", "rejected"] } }
 };
 
+/** The AppWorks-namespaced attribute naming how a submit can be looked up again by its operation key (src/contract.ts). */
+export const RECONCILIATION = "org.appworks.reconciliation/1";
+
 export function accountingContract(): AppPortManifest {
   const recipe = supplierInvoice();
   const submit = stepOf(recipe, "submit");
@@ -63,12 +66,35 @@ export function accountingContract(): AppPortManifest {
         authorizationContract: { required: true, scopes: ["accounting.invoice.submit"] },
         effect: "consequential",
         idempotency: "supported"
+      }),
+      // Added after the first revision, additively: reports what became of a submit, by the operation key it carried. When
+      // the key is unknown it is *fenced*: the provider refuses that key from then on, so "absent" is final and not a race.
+      entry("invoice.operation.resolve", {
+        kind: "request",
+        inputSchema: { type: "object", additionalProperties: false, required: ["operationKey"], properties: { operationKey: { type: "string", minLength: 1 } } },
+        outputSchema: {
+          type: "object",
+          required: ["state"],
+          properties: {
+            state: { type: "string", enum: ["recorded", "absent"] },
+            output: { type: "object", required: ["invoiceId", "status"], properties: { invoiceId: { type: "string" }, status: { type: "string", enum: ["submitted", "rejected"] } } },
+            consistency: { type: "string", enum: ["strong", "eventual"] },
+            fenced: { type: "boolean" }
+          }
+        },
+        authorization: ["accounting.invoice.resolve"],
+        authorizationContract: { required: true, scopes: ["accounting.invoice.resolve"] },
+        effect: "consequential",
+        idempotency: "supported"
       })
     ],
     events: [],
     transports: [],
     extensions: [CANONICAL_CONTRACT_EXTENSION, INTEGRATION_EXTENSION],
-    attributes: { [INTEGRATION_EXTENSION]: { capabilities: { "invoice.submit@1": integration } } as never }
+    attributes: {
+      [INTEGRATION_EXTENSION]: { capabilities: { "invoice.submit@1": integration } } as never,
+      [RECONCILIATION]: { "invoice.submit@1": { via: { capability: "invoice.operation.resolve", version: 1, keyField: "operationKey" }, absenceConclusive: true } } as never
+    }
   };
 }
 

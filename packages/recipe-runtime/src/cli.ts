@@ -6,9 +6,13 @@
  *   appworks recipe run <recipe.json> --input <json|@file> --environment <module> [--principal <name>] [--home <dir>] [--json]
  *   appworks recipe status <run> [--home <dir>] [--json]
  *   appworks recipe resume <run> --environment <module> [--home <dir>] [--json]
+ *   appworks recipe reconcile <run> --environment <module> [--principal <name>] [--home <dir>] [--json]
+ *   appworks recipe answer <run> <step> --response <json|@file> --environment <module> [--principal <name>] [--home <dir>] [--json]
+ *   appworks recipe expire <run> <step> --environment <module> [--principal <name>] [--home <dir>] [--json]
  *
  * Exit status: 0 completed, 10 rejected, 11 failed, 12 uncertain, 20 waiting for a human task, 2 usage, 1 refused or error.
- * Answering a human task has no command yet (spec §12): `status` lists what is pending.
+ * `status` lists pending tasks and reconciliations. `reconcile` looks up a lost consequential invocation by its operation key and
+ * never submits anything (spec §6.5); it can leave the run uncertain.
  */
 import { readFileSync, realpathSync } from "node:fs";
 import { homedir, userInfo } from "node:os";
@@ -39,6 +43,9 @@ const USAGE = `usage:
   appworks recipe run <recipe.json> --input <json|@file> --environment <module> [--principal <name>] [--home <dir>] [--json]
   appworks recipe status <run> [--home <dir>] [--json]
   appworks recipe resume <run> --environment <module> [--home <dir>] [--json]
+  appworks recipe reconcile <run> --environment <module> [--principal <name>] [--home <dir>] [--json]
+  appworks recipe answer <run> <step> --response <json|@file> --environment <module> [--principal <name>] [--home <dir>] [--json]
+  appworks recipe expire <run> <step> --environment <module> [--principal <name>] [--home <dir>] [--json]
 exit: 0 completed, 10 rejected, 11 failed, 12 uncertain, 20 waiting for a task, 2 usage, 1 refused or error`;
 
 const EXIT = { completed: 0, rejected: 10, failed: 11, uncertain: 12 } as const;
@@ -75,16 +82,19 @@ function describe(run: RunView): string[] {
   if (run.output !== undefined) lines.push(`  output: ${JSON.stringify(run.output)}`);
   for (const i of run.invocations) lines.push(`  ${i.purpose === "verification" ? "probe" : "invoke"} ${i.stepId} [${i.effect}] ${i.status}${i.classification ? ` (${i.classification})` : ""}${i.cause ? ` cause=${i.cause}` : ""}`);
   for (const v of run.verifications) lines.push(`  verify ${v.stepId}/${v.methodId} (${v.source}): ${v.result}${v.reason ? ` - ${v.reason}` : ""}`);
+  for (const r of run.reconciliations) lines.push(`  reconcile ${r.stepId}: ${r.resolution}${r.reason ? ` - ${r.reason}` : ""} (by ${r.by})`);
   for (const t of run.tasks) lines.push(`  task ${t.stepId} for ${t.role}${t.approval ? " (approval)" : ""}: ${t.status}${t.answeredBy ? ` by ${t.answeredBy}` : ""}`);
   return lines;
 }
+
+const principalOf = (options: Record<string, string | true>): string => (typeof options["principal"] === "string" ? options["principal"] : userInfo().username);
 
 const exitFor = (run: RunView): number => (run.status === "waiting" ? 20 : run.outcome ? EXIT[run.outcome] : 1);
 
 export async function main(argv: string[], io: CliIO = { out: (t) => process.stdout.write(`${t}\n`), err: (t) => process.stderr.write(`${t}\n`) }, environment: CliEnvironment = {}): Promise<number> {
   const args = argv[0] === "recipe" ? argv.slice(1) : argv;
   const [command, ...rest] = args;
-  if (command !== "run" && command !== "status" && command !== "resume") {
+  if (!["run", "status", "resume", "reconcile", "answer", "expire"].includes(command ?? "")) {
     io.err(USAGE);
     return 2;
   }
@@ -115,9 +125,25 @@ export async function main(argv: string[], io: CliIO = { out: (t) => process.std
         return 2;
       }
       const input = JSON.parse(raw.startsWith("@") ? readFileSync(resolve(raw.slice(1)), "utf8") : raw) as unknown;
-      run = await runtime.start(recipe, input, typeof options["principal"] === "string" ? options["principal"] : userInfo().username);
+      run = await runtime.start(recipe, input, principalOf(options));
     } else if (command === "resume") run = await runtime.resume(target);
-    else run = await runtime.status(target);
+    else if (command === "reconcile") run = await runtime.reconcile(target, principalOf(options));
+    else if (command === "answer" || command === "expire") {
+      const step = positional[1];
+      if (!step) {
+        io.err(USAGE);
+        return 2;
+      }
+      if (command === "expire") run = await runtime.expireTask(target, step, principalOf(options));
+      else {
+        const raw = options["response"];
+        if (typeof raw !== "string") {
+          io.err("--response <json|@file> is required");
+          return 2;
+        }
+        run = await runtime.answerTask(target, step, JSON.parse(raw.startsWith("@") ? readFileSync(resolve(raw.slice(1)), "utf8") : raw), principalOf(options));
+      }
+    } else run = await runtime.status(target);
     io.out(options["json"] === true ? JSON.stringify(run, null, 2) : describe(run).join("\n"));
     return command === "status" && run.status === "running" ? 0 : exitFor(run);
   } catch (error) {

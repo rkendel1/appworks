@@ -80,3 +80,34 @@ describe("appworks recipe", () => {
     expect(refused.err).toContain("RECIPE_INVALID");
   });
 });
+
+describe("appworks recipe answer | expire | reconcile", () => {
+  it("answers and expires tasks, and reconciles an uncertain run, from separate invocations", async () => {
+    const recipe = supplierInvoice();
+    const recipeFile = join(dir, "recipe.json");
+    writeFileSync(recipeFile, JSON.stringify(recipe));
+    const accounting = await accountingEnvironment(join(dir, "env"), recipe);
+    closers.push(() => accounting.close());
+    const environment: CliEnvironment = { load: async () => ({ gateway: accounting.gateway }) };
+    const common = ["--environment", "env.mjs", "--home", join(dir, "home"), "--json"];
+    const start = async (n: string, amount: number) => JSON.parse((await cli(["recipe", "run", recipeFile, "--input", JSON.stringify({ ...AUTO, invoiceNumber: n, amount }), ...common], environment)).out);
+
+    const approve = await start("INV-A", 20000);
+    expect((await cli(["recipe", "answer", approve.id, "request-approval", "--response", '{"decision":"approved"}', ...common], environment)).code).toBe(0);
+    const expire = await start("INV-B", 20000);
+    expect((await cli(["recipe", "expire", expire.id, "request-approval", ...common], environment)).code).toBe(11);
+    expect((await cli(["recipe", "answer", expire.id, "request-approval", "--response", '{"decision":"approved"}', ...common], environment)).err).toContain("TASK_NOT_PENDING");
+    expect((await cli(["recipe", "answer", expire.id, ...common], environment)).code).toBe(2);
+
+    accounting.ledger.faults.loseResponseAfterCommit = true;
+    const lost = await start("INV-C", 120);
+    expect(lost.outcome).toBe("uncertain");
+    accounting.ledger.faults.loseResponseAfterCommit = false;
+    const reconciled = await cli(["recipe", "reconcile", lost.id, ...common], environment);
+    expect(reconciled.code).toBe(0);
+    expect(JSON.parse(reconciled.out)).toMatchObject({ outcome: "completed", reconciliations: [{ resolution: "confirmed-completed" }] });
+    expect((await accounting.ledger.invoices()).filter((i) => i.invoiceNumber === "INV-C")).toHaveLength(1);
+    expect((await cli(["recipe", "reconcile", lost.id, ...common], environment)).err).toContain("NOT_RECONCILABLE");
+    expect((await cli(["recipe", "status", lost.id, "--home", join(dir, "home")])).out).toContain("reconcile submit: confirmed-completed");
+  });
+});

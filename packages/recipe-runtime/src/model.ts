@@ -42,13 +42,13 @@ export interface StepAttemptRecord {
   finishedAt?: string;
 }
 
-export type InvocationStatus = "intent" | "succeeded" | "failed" | "uncertain" | "abandoned";
+export type InvocationStatus = "prepared" | "intent" | "succeeded" | "failed" | "uncertain" | "abandoned";
 
 export interface InvocationRecord {
   id: string;
   runId: string;
   stepId: string;
-  purpose: "step" | "verification";
+  purpose: "step" | "verification" | "reconciliation";
   ordinal: number;
   dependency: string;
   effect: "observation" | "consequential";
@@ -93,6 +93,22 @@ export interface HumanTaskRecord {
   closedAt?: string;
 }
 
+export type Resolution = "confirmed-completed" | "confirmed-not-executed" | "indeterminate";
+
+export interface ReconciliationRecord {
+  id: string;
+  runId: string;
+  stepId: string;
+  invocation: string;
+  operationKey: string;
+  resolution: Resolution;
+  lookup?: string;
+  evidence: JsonValue;
+  reason?: string;
+  by: string;
+  at: string;
+}
+
 export interface RunEventRecord {
   id: string;
   runId: string;
@@ -116,6 +132,7 @@ export type RuntimeErrorCode =
   | "FLOW_NOT_DEPLOYED"
   | "TASK_NOT_FOUND"
   | "TASK_NOT_PENDING"
+  | "NOT_RECONCILABLE"
   | "RESPONSE_INVALID"
   | "INVARIANT";
 

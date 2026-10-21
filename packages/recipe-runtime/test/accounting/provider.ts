@@ -11,6 +11,7 @@ export interface ProviderNames {
   duplicate: string;
   get: string;
   submit: string;
+  resolve: string;
 }
 
 export function ledgerProvider(id: string, contract: AppPortManifest, ledger: Ledger, names: ProviderNames) {
@@ -52,7 +53,8 @@ export function ledgerProvider(id: string, contract: AppPortManifest, ledger: Le
       }
     }
   );
-  const capabilities = [duplicates, read, submit];
+  const resolve = make(names.resolve, "invoice.operation.resolve", async (input: { operationKey: string }) => ledger.resolve(input.operationKey));
+  const capabilities = [duplicates, read, submit, resolve];
   const app = defineApplication({
     identity: { id, name: id, version: "1.0.0" },
     provides: capabilities as never,

@@ -46,14 +46,14 @@ app appworks_recipe_runtime {
     id: text
     runId: text
     stepId: text
-    purpose: enum(step, verification)
+    purpose: enum(step, verification, reconciliation)
     ordinal: integer
     dependency: text
     effect: enum(observation, consequential)
     idempotencyKey: text
     inputDigest: text
     input: json
-    status: enum(intent, succeeded, failed, uncertain, abandoned)
+    status: enum(prepared, intent, succeeded, failed, uncertain, abandoned)
     classification: enum(success, pre-effect, effect-unknown)?
     provider: json?
     output: json?
@@ -91,6 +91,21 @@ app appworks_recipe_runtime {
     answeredBy: text?
     createdAt: datetime
     closedAt: datetime?
+    index runId using hash(runId)
+  }
+
+  collection Reconciliation {
+    id: text
+    runId: text
+    stepId: text
+    invocation: text
+    operationKey: text
+    resolution: enum(confirmed-completed, confirmed-not-executed, indeterminate)
+    lookup: text?
+    evidence: json
+    reason: text?
+    by: text
+    at: datetime
     index runId using hash(runId)
   }
 
