@@ -1,0 +1,285 @@
+flow_version 1
+
+// The AppWorks project workspace: its durable records and its transformation workflow.
+// This file is authoritative. The workspace deploys it into FeltDB when it opens, derives its stages, steps,
+// evidence and approval actions from it, and refuses any write to a collection or field it does not declare.
+
+app appworks_workspace {
+  collection Project {
+    id: text
+    createdAt: datetime
+    createdBy: text
+    updatedAt: datetime
+    repository: json
+    ref: text
+    revision: json?
+    stage: enum(project-selected, repository-acquired, revision-pinned, integration-inspected, capabilities-discovered, assessment-completed, inventory-reconciled, candidate-selected, extraction-planned, awaiting-approval, extraction-executed, verification-completed, ready-for-promotion, contract-proposed, contract-adopted, promotion-proposed, promotion-applied, promotion-verified, ready-for-review, submitted-for-review)
+    condition: json
+    failure: json?
+    current: json
+    activeRun: text?
+    history: integer
+    index createdBy using hash(createdBy)
+  }
+
+  collection StageEvent {
+    id: text
+    projectId: text
+    sequence: integer
+    step: text
+    from: text?
+    to: text
+    condition: enum(active, partial, failed, cancelled)
+    at: datetime
+    actor: text
+    evidence: array<text>
+    reasons: json
+    note: text?
+    index projectId using hash(projectId)
+  }
+
+  collection Run {
+    id: text
+    projectId: text
+    step: text
+    attempt: integer
+    status: enum(running, succeeded, failed, abandoned, not-applied)
+    owner: text
+    actor: text
+    startedAt: datetime
+    leaseExpiresAt: datetime
+    finishedAt: datetime?
+    error: json?
+    effect: json?
+    input: json?
+    index projectId using hash(projectId)
+    index status using hash(status)
+  }
+
+  collection Artifact {
+    id: text
+    projectId: text
+    kind: enum(integration, discovery, assessment, inventory, plan, extraction, verification-log, adoption, promotion, patch, promotion-verification, promotion-log)
+    fileDigest: text
+    digest: text?
+    format: text?
+    path: text
+    bytes: integer
+    revision: text
+    createdAt: datetime
+    run: text
+    partial: array<text>
+    summary: json
+    index projectId using hash(projectId)
+  }
+
+  collection Approval {
+    id: text
+    projectId: text
+    action: enum(generate-files, adopt-contract, modify-integration, commit, push, pull-request, promote)
+    subject: text
+    subjectDescription: text
+    status: enum(requested, granted, consumed, revoked)
+    requestedAt: datetime
+    requestedBy: text
+    grantedAt: datetime?
+    grantedBy: text?
+    consumedAt: datetime?
+    consumedBy: text?
+    index projectId using hash(projectId)
+  }
+
+  collection Decision {
+    id: text
+    projectId: text
+    kind: enum(match-assertion, candidate-selection, promotion-status, contract-adoption)
+    at: datetime
+    by: text?
+    candidate: text?
+    name: text?
+    capability: json?
+    rationale: text?
+    assessmentDigest: text?
+    status: text?
+    verification: text?
+    extractionDigest: text?
+    deployed: boolean?
+    approval: text?
+    note: text?
+    adoption: text?
+    adoptionDigest: text?
+    contract: json?
+    index projectId using hash(projectId)
+  }
+
+  collection Verification {
+    id: text
+    projectId: text
+    at: datetime
+    extraction: text
+    extractionDigest: text
+    assessmentDigest: text
+    planDigest: text
+    treeDigest: text
+    revision: text
+    status: enum(verified, not-verified)
+    integrity: json
+    behaviors: json
+    records: json
+    checkoutUnchanged: boolean
+    reasons: json
+    index projectId using hash(projectId)
+  }
+
+  // A promotion: one immutable promotion artifact (`artifact`, `digest`) and where it is in its lifecycle. The artifact
+  // never changes; this record carries the state (proposed, approved, applied to the isolated worktree, verified or not,
+  // ready for review, committed for review), the worktree, the patch and the evidence, each by reference and digest.
+  collection Promotion {
+    id: text
+    projectId: text
+    artifact: text
+    digest: text
+    state: enum(proposed, approved, applied, verified, verification-failed, ready-for-review, submitted-for-review)
+    worktree: text
+    base: text
+    createdAt: datetime
+    updatedAt: datetime
+    approval: text?
+    appliedAt: datetime?
+    patch: text?
+    patchDigest: text?
+    files: json?
+    verification: text?
+    verificationStatus: enum(verified, not-verified)?
+    reasons: json?
+    commit: text?
+    branch: text?
+    index projectId using hash(projectId)
+  }
+
+  // One step per transition. `from` lists the stages a step starts from, `rerun` the later stages it may be run
+  // again from (clearing what later stages derived), `to` the stage it reaches, `evidence` the current-evidence slot
+  // it fills and `approval` the approval its action boundary requires. Stages are the steps' `to`, in order.
+  workflow transformation(project) {
+    step create {
+      to project-selected
+    }
+    step acquire {
+      from project-selected
+      to repository-acquired
+    }
+    step pin {
+      from repository-acquired
+      to revision-pinned
+    }
+    step inspect {
+      from revision-pinned
+      to integration-inspected
+      evidence integration
+    }
+    step discover {
+      from integration-inspected
+      rerun capabilities-discovered
+      to capabilities-discovered
+      evidence discovery
+    }
+    step assess {
+      from capabilities-discovered
+      to assessment-completed
+      evidence assessment
+    }
+    step reconcile {
+      from assessment-completed
+      rerun inventory-reconciled candidate-selected
+      to inventory-reconciled
+      evidence inventory
+    }
+    step select {
+      from inventory-reconciled
+      rerun candidate-selected extraction-planned awaiting-approval
+      to candidate-selected
+      evidence selection
+    }
+    step plan {
+      from candidate-selected
+      rerun awaiting-approval
+      to extraction-planned
+      evidence plan
+    }
+    step request-approval {
+      from extraction-planned
+      to awaiting-approval
+      evidence approvalRequest
+    }
+    step execute {
+      from awaiting-approval
+      to extraction-executed
+      evidence extraction
+      approval generate-files
+    }
+    step verify {
+      from extraction-executed
+      rerun verification-completed ready-for-promotion
+      to verification-completed
+      evidence verification
+    }
+    step ready {
+      from verification-completed
+      to ready-for-promotion
+      evidence promotion
+    }
+    step propose-contract {
+      from ready-for-promotion
+      rerun contract-proposed
+      to contract-proposed
+      evidence adoption
+    }
+    step adopt-contract {
+      from contract-proposed
+      to contract-adopted
+      evidence adoptionDecision
+      approval adopt-contract
+    }
+    step propose-promotion {
+      from contract-adopted
+      rerun promotion-proposed
+      to promotion-proposed
+      evidence promotionArtifact
+    }
+    step apply-promotion {
+      from promotion-proposed
+      to promotion-applied
+      evidence patch
+      approval modify-integration
+    }
+    step verify-promotion {
+      from promotion-applied
+      rerun promotion-verified ready-for-review
+      to promotion-verified
+      evidence promotionVerification
+    }
+    step prepare-review {
+      from promotion-verified
+      to ready-for-review
+      evidence review
+    }
+    step submit-review {
+      from ready-for-review
+      to submitted-for-review
+      evidence submission
+      approval pull-request
+    }
+  }
+
+  // Approval is separate from authority: each action class needs its own explicit approval of an exact subject,
+  // enforced where the action happens. A verified extraction or a valid fulfillment claim approves none of them.
+  policy approvals {
+    action generate-files
+    action adopt-contract
+    action modify-integration
+    action commit
+    action push
+    action pull-request
+    action promote
+  }
+}
