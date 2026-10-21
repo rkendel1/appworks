@@ -103,7 +103,7 @@ describe("repository input", () => {
     expect(a.coverage.skipped.filter((s) => s.reason === "symlink").map((s) => s.path)).toEqual(["linked", "server/alias.go", "server/evil.go"]);
     expect(a.findings.filter((f) => f.code === "SYMLINK_SKIPPED")).toHaveLength(3);
     expect(JSON.stringify(a)).not.toContain(outside);
-    expect(a.candidates.map((c) => c.operation.service)).not.toContain("Evil");
+    expect(a.candidates.map((c) => (c.operation.kind === "rpc" ? c.operation.service : ""))).not.toContain("Evil");
     expect(() => readRepositoryFile(root, "server/evil.go")).toThrow(RepositoryError);
   });
 
@@ -240,7 +240,7 @@ describe("artifact integrity", () => {
   it("refuses other formats and non-objects", () => {
     expect(codes(null)).toEqual(["ASSESSMENT_MALFORMED"]);
     expect(codes([])).toEqual(["ASSESSMENT_MALFORMED"]);
-    expect(codes({ ...a, format: "appport.application-assessment/2" })).toContain("ASSESSMENT_FORMAT");
+    expect(codes({ ...a, format: "appport.application-assessment/3" })).toContain("ASSESSMENT_FORMAT");
   });
 
   it("checks observed locations against the repository, and the revision it was taken at", () => {

@@ -71,7 +71,8 @@ export function candidateRefusals(candidate: Candidate | undefined, id: string):
     if (unmet(criterion)) out.push({ code, message: `${criterion}: ${unmet(criterion)!.reason}` });
   if (candidate.exposure.effectBasis.effect !== "observation" || candidate.sideEffects.persistence.some((p) => p.operation !== "read")) out.push({ code: "CANDIDATE_NOT_READ_ONLY", message: "this version extracts read-only operations only" });
   if (candidate.sideEffects.outboundHttp.length || candidate.sideEffects.async.length) out.push({ code: "CANDIDATE_BLOCKING_CONCERN", message: "outbound HTTP or asynchronous work is reachable" });
-  if (candidate.operation.streaming) out.push({ code: "CANDIDATE_STREAMING", message: "streaming operations are not extracted by this version" });
+  if (candidate.operation.kind !== "rpc") out.push({ code: "CANDIDATE_NOT_RPC", message: `${id} is an ${candidate.operation.kind} operation: this version extracts Protocol Buffers RPCs, and has no way to derive a contract, an adapter or a behavioral suite for an HTTP route` });
+  else if (candidate.operation.streaming) out.push({ code: "CANDIDATE_STREAMING", message: "streaming operations are not extracted by this version" });
   if (!candidate.exposure.capability) out.push({ code: "CANDIDATE_NO_PROPOSAL", message: "the assessment proposes no capability shape for it" });
   return out;
 }
@@ -209,6 +210,7 @@ export function createExtraction(input: ExtractInput): CapabilityExtraction {
   const candidateProblems = candidateRefusals(candidate, input.candidate);
   if (candidateProblems.length) throw new ExtractionRefused(candidateProblems);
   const c = candidate!;
+  if (c.operation.kind !== "rpc") throw new ExtractionRefused([{ code: "CANDIDATE_NOT_RPC", message: `${c.id} is not a Protocol Buffers RPC` }]); // refused above; narrows the type
   const proposal = c.exposure.capability!;
 
   // Contract and adapter.

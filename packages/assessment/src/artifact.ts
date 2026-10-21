@@ -12,6 +12,16 @@ import { gitIdentity, isInside, readRepositoryFile, repositoryRoot, type SkipRea
 
 export const ASSESSMENT_FORMAT = "appport.application-assessment/1";
 export const SCANNER_VERSION = "appport.assessment-scanner/1";
+/**
+ * Scanner 2 adds HTTP-route candidates read from JavaScript and TypeScript (`js.ts`), and needs a format that can say so: `/2`
+ * is `/1` plus an `http` operation, an `http-route` entry point and the `js-static` collection method. Scanner 1 is unchanged
+ * and still writes `/1`, byte for byte, so every existing assessment (and every extraction that records one's digest) reproduces.
+ */
+export const ASSESSMENT_FORMAT_2 = "appport.application-assessment/2";
+export const SCANNER_VERSION_2 = "appport.assessment-scanner/2";
+export const ASSESSMENT_FORMATS = [ASSESSMENT_FORMAT, ASSESSMENT_FORMAT_2] as const;
+/** Which scanner each format is written by; a reader refuses a mismatch. */
+export const SCANNER_OF_FORMAT: Record<string, string> = { [ASSESSMENT_FORMAT]: SCANNER_VERSION, [ASSESSMENT_FORMAT_2]: SCANNER_VERSION_2 };
 export const TOOL_NAME = "@appport/assessment";
 export const TOOL_VERSION = "0.1.0";
 
@@ -25,7 +35,9 @@ export const TOOL_VERSION = "0.1.0";
 export const EVIDENCE_CLASSES = ["observed", "inferred", "unknown"] as const;
 export type EvidenceClass = (typeof EVIDENCE_CLASSES)[number];
 
-export const COLLECTION_METHODS = ["scanner", "manifest-parse", "proto-static", "go-static", "path-convention", "git-metadata", "derivation"] as const;
+export const COLLECTION_METHODS = ["scanner", "manifest-parse", "proto-static", "go-static", "path-convention", "git-metadata", "derivation", "js-static"] as const;
+/** Methods only `/2` may use. */
+export const FORMAT_2_METHODS: readonly string[] = ["js-static"];
 export type CollectionMethod = (typeof COLLECTION_METHODS)[number];
 
 export interface Location {
@@ -111,15 +123,25 @@ export interface ExposureProposal {
   missing: string[];
 }
 
+/** `/2` only: an HTTP route registered in source. `path` is the full path with mounts applied; `{name}` marks a name in it whose value is not known. */
+export interface HttpOperation {
+  kind: "http";
+  method: string;
+  path: string;
+  framework: string;
+  /** Names standing in the path whose values the assessment did not establish (`/${entity}/list` has `entity`). */
+  placeholders: string[];
+}
+
 export interface Candidate {
   /** Stable: derived from the entry point, e.g. `cand-memos.api.MemoService.GetMemo`. */
   id: string;
   name: string;
   /** Describes the construct, never what it does: names and comments are not semantic evidence. */
   description: string;
-  operation: { kind: "rpc"; service: string; method: string; fullMethod: string; streaming: boolean };
-  entryPoints: Array<{ kind: "proto-rpc" | "http-binding"; subject: string; evidence: string[] }>;
-  implementation?: { symbol: string; location: Location; link: "name-and-request-type" | "name-only"; evidence: string[] };
+  operation: { kind: "rpc"; service: string; method: string; fullMethod: string; streaming: boolean } | HttpOperation;
+  entryPoints: Array<{ kind: "proto-rpc" | "http-binding" | "http-route"; subject: string; evidence: string[] }>;
+  implementation?: { symbol: string; location: Location; link: "name-and-request-type" | "name-only" | "route-inline" | "route-handler-reference"; evidence: string[] };
   inputs?: MessageShape;
   outputs?: MessageShape;
   dependencies: {
@@ -184,7 +206,7 @@ export interface Coverage {
 }
 
 export interface AssessmentConfiguration {
-  scanner: typeof SCANNER_VERSION;
+  scanner: typeof SCANNER_VERSION | typeof SCANNER_VERSION_2;
   maxFileBytes: number;
   excludedDirectories: string[];
   maxCallDepth: number;
@@ -204,7 +226,7 @@ export interface Inventory {
 }
 
 export interface ApplicationAssessment {
-  format: typeof ASSESSMENT_FORMAT;
+  format: typeof ASSESSMENT_FORMAT | typeof ASSESSMENT_FORMAT_2;
   /** Volatile: excluded from the digest. */
   assessment: { id: string; createdAt: string };
   tool: { name: string; version: string };
@@ -268,11 +290,13 @@ export function verifyAssessment(value: unknown, options: { repository?: string 
     add("ASSESSMENT_MALFORMED", "", "an assessment is a JSON object");
     return { ok: false, findings };
   }
-  if (value.format !== ASSESSMENT_FORMAT) add("ASSESSMENT_FORMAT", "/format", `unsupported format ${JSON.stringify(value.format)}; this reader implements ${ASSESSMENT_FORMAT}`);
+  if (!(ASSESSMENT_FORMATS as readonly unknown[]).includes(value.format)) add("ASSESSMENT_FORMAT", "/format", `unsupported format ${JSON.stringify(value.format)}; this reader implements ${ASSESSMENT_FORMATS.join(" and ")}`);
   for (const key of Object.keys(value)) if (!TOP_LEVEL.includes(key)) add("ASSESSMENT_MEMBER", `/${key}`, `undocumented member "${key}"`);
   for (const key of TOP_LEVEL) if (!(key in value)) add("ASSESSMENT_MEMBER", `/${key}`, `missing member "${key}"`);
   if (findings.length) return { ok: false, findings };
 
+  const configuredScanner = isObject(value.configuration) ? value.configuration.scanner : undefined;
+  if (configuredScanner !== SCANNER_OF_FORMAT[value.format as string]) add("ASSESSMENT_SCANNER", "/configuration/scanner", `${String(value.format)} is written by ${SCANNER_OF_FORMAT[value.format as string]}, not ${JSON.stringify(configuredScanner)}`);
   const evidence = value.evidence;
   const candidates = value.candidates;
   if (!Array.isArray(evidence) || !Array.isArray(candidates)) {
@@ -293,7 +317,7 @@ export function verifyAssessment(value: unknown, options: { repository?: string 
     const { id: _id, ...content } = record;
     if (evidenceId(content as Omit<Evidence, "id">) !== id) add("EVIDENCE_ID", `${at}/id`, `${id} is not the content id of this record`);
     if (!EVIDENCE_CLASSES.includes(record.class as EvidenceClass)) add("EVIDENCE_CLASS", `${at}/class`, `unknown evidence class ${JSON.stringify(record.class)}`);
-    if (!COLLECTION_METHODS.includes(record.method as CollectionMethod)) add("EVIDENCE_METHOD", `${at}/method`, `unknown collection method ${JSON.stringify(record.method)}`);
+    if (!COLLECTION_METHODS.includes(record.method as CollectionMethod) || (value.format === ASSESSMENT_FORMAT && FORMAT_2_METHODS.includes(record.method as string))) add("EVIDENCE_METHOD", `${at}/method`, `unknown collection method ${JSON.stringify(record.method)} for ${String(value.format)}`);
     if (typeof record.kind !== "string" || typeof record.observation !== "string") add("EVIDENCE_MALFORMED", at, "kind and observation are strings");
     const location = record.location;
     if (location !== undefined) {
@@ -341,6 +365,8 @@ export function verifyAssessment(value: unknown, options: { repository?: string 
     for (const key of Object.keys(candidate)) if (!CANDIDATE_MEMBERS.includes(key)) add("CANDIDATE_MEMBER", `${at}/${key}`, `undocumented member "${key}"`);
     if (typeof candidate.id !== "string" || candidateIds.has(candidate.id)) add("CANDIDATE_ID", `${at}/id`, "candidate ids are unique strings");
     else candidateIds.add(candidate.id);
+    const operation = candidate.operation;
+    if (!isObject(operation) || !(operation.kind === "rpc" || (operation.kind === "http" && value.format === ASSESSMENT_FORMAT_2))) add("CANDIDATE_OPERATION", `${at}/operation/kind`, `an operation is an rpc${value.format === ASSESSMENT_FORMAT_2 ? " or an http route" : " (http routes are appport.application-assessment/2)"}`);
     const readiness = candidate.readiness;
     if (!isObject(readiness) || !READINESS_CLASSES.includes(readiness.class as ReadinessClass)) add("READINESS_CLASS", `${at}/readiness/class`, `readiness is one of ${READINESS_CLASSES.join(", ")}; an assessment never establishes that a capability is verified`);
     const exposure = candidate.exposure;
