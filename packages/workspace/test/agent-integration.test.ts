@@ -81,7 +81,9 @@ describe("an older workspace home", () => {
     await writer.close();
     // The same records in a home whose FeltDB holds the previous feltdb.flow (no agent collections, no agentRun).
     const home = tempDir("ws-older-");
-    const previous = execFileSync("git", ["show", "0022689:packages/workspace/feltdb.flow"], { cwd: join(import.meta.dirname, "..", "..", ".."), encoding: "utf8" });
+    // `fixtures/feltdb.flow.v1` is packages/workspace/feltdb.flow as of 0022689, kept as a file so the test does not need
+    // the repository's history (CI checks out one commit).
+    const previous = readFileSync(join(import.meta.dirname, "fixtures", "feltdb.flow.v1"), "utf8");
     const db = createFeltDB({ namespace: "appworks-workspace", mode: "local", path: join(home, "state") });
     await db.deployFlowSpec(parseFlowSpec(previous));
     await db.transaction({ operations: records.map(({ collection, value }) => {
