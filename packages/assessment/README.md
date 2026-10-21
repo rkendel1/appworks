@@ -33,6 +33,12 @@ verifyAssessment(assessment, { repository: "./memos" });
 outbound `net/http`, configuration keys, tests). `go.mod` and `package.json` are read as manifests. Other languages are counted and
 reported, and make an assessment partial.
 
+**Scanner 2** (`assessRepository(path, { scanner: 2 })`, `appworks assess --scanner 2`, format `appport.application-assessment/2`) also reads the HTTP
+routes a JavaScript or TypeScript application registers (Express, Fastify, Koa router, Hono, NestJS), with the prefixes of the mounts that lead to
+each, the middleware in front of it and, where one exists, its handler's definition. A route is evidence that an entry point exists and nothing
+more: no handler body is read and no shape is assumed, so a route is `investigate` at best, is never recommended, and cannot yet be extracted.
+Scanner 1 is the default and its output is unchanged, so existing digests still reproduce. See `spec/assessment-1.md` §11.
+
 **Guarantees:** it never writes to, executes, builds or imports anything in the target; it never follows symbolic links; it uses no network
 and no language model. Every observed fact has a location you can check; every inference names its basis; what it cannot determine is
 recorded as unknown. It never claims verified behavior, grants no authority, registers nothing, and its proposed capability is not a

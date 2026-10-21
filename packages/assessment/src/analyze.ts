@@ -7,8 +7,10 @@ import { basename, posix } from "node:path";
 import { isValidName, type CapabilityEffect } from "@appport/protocol";
 import {
   ASSESSMENT_FORMAT,
+  ASSESSMENT_FORMAT_2,
   BLOCKING_CONCERNS,
   SCANNER_VERSION,
+  SCANNER_VERSION_2,
   TOOL_NAME,
   TOOL_VERSION,
   assessmentDigest,
@@ -29,10 +31,18 @@ import {
 } from "./artifact.js";
 import { DEFAULT_EXCLUDED_DIRECTORIES, DEFAULT_MAX_FILE_BYTES, gitIdentity, readRepositoryFile, repositoryRoot, walkRepository, type SkipReason } from "./files.js";
 import { SourceSyntaxError, bodyFacts, isGeneratedGo, parseGo, signatureTypes, type BodyFacts, type GoFile, type GoFunction, type GoType, type Token } from "./go.js";
+import { httpCandidates } from "./http.js";
+import { JsSyntaxError, readJs, tokenize, type JsFile } from "./js.js";
 import { messageSchema, proposeCapabilityName, type ProtoIndex } from "./proposal.js";
 import { parseProto, type ProtoService } from "./proto.js";
 
 export interface AssessOptions {
+  /**
+   * `1` (default): Go and Protocol Buffers, as before, writing `appport.application-assessment/1`.
+   * `2`: also reads HTTP routes from JavaScript and TypeScript (`http.ts`), writing `/2`. A different scanner can assess the same tree
+   * differently (`docs/compatibility.md`), so it is chosen, never switched on silently.
+   */
+  scanner?: 1 | 2;
   maxFileBytes?: number;
   excludedDirectories?: readonly string[];
   maxCallDepth?: number;
@@ -57,6 +67,23 @@ const LANGUAGES: Record<string, string> = {
   ".vue": "vue", ".svelte": "svelte", ".dart": "dart", ".ex": "elixir", ".exs": "elixir"
 };
 const SUPPORTED = new Set(["go", "protobuf"]);
+/** What scanner 2 analyzes, beyond scanner 1's. Only plain `.js`/`.ts` families: JSX and TSX are markup, not route registration. */
+const SUPPORTED_2 = new Set([...SUPPORTED, "javascript", "typescript"]);
+const JS_ROUTING_EXTENSIONS = new Set([".js", ".mjs", ".cjs", ".ts", ".mts", ".cts"]);
+const NOT_ROUTING_PATH = /(^|\/)(tests?|__tests__|__mocks__|spec|e2e|cypress)\/|\.(test|spec)\.[cm]?[jt]s$|\.d\.[cm]?ts$/;
+/** A file that mentions none of these cannot register a route on a framework this reader knows; it is counted, not analyzed. */
+const ROUTING_HINT = /\b(express|fastify|Fastify|Router|koa|Hono|hono)\b|@nestjs\//;
+
+/** Scanner 2's limitations: scanner 1's, with the languages entry replaced and the HTTP reader's added. */
+export function limitationsFor(scanner: 1 | 2): ReadonlyArray<{ code: string; description: string }> {
+  if (scanner === 1) return LIMITATIONS;
+  return [
+    ...LIMITATIONS.map((l) => (l.code === "languages" ? { code: "languages", description: "Go, Protocol Buffers, and HTTP route registrations in JavaScript and TypeScript are analyzed. go.mod and package.json are read as manifests. Other languages, and JSX/TSX markup, are counted and reported, not analyzed. A JavaScript or TypeScript file is read only if it mentions a routing framework this reader knows (Express, Fastify, Koa router, Hono, NestJS); the rest are counted, not analyzed." } : l)),
+    { code: "http-routes", description: "A route is found where it is registered with a literal path on a receiver declared as an Express/Fastify/Koa/Hono app or router, or on a NestJS controller. Routes registered in loops, by helper functions, by reflection or from configuration are found only as far as the registration call itself is literal; a name inside a path stays a placeholder." },
+    { code: "http-handlers", description: "A handler's body is not read. A reference is followed one import to a definition of that name when one is found; a handler built by a factory or re-exported is not located. What a middleware enforces is not established." },
+    { code: "http-effect", description: "The proposed effect of a route follows its HTTP method by convention and is inferred; a handler can break the convention in either direction." }
+  ];
+}
 
 export const LIMITATIONS: ReadonlyArray<{ code: string; description: string }> = [
   { code: "static-only", description: "Nothing in the target was built, executed or contacted; behavior is described from source text, never observed at run time." },
@@ -110,8 +137,10 @@ const dirOf = (path: string) => posix.dirname(path);
 /** Assesses the repository at `path`. Throws `RepositoryError` for a path that is not a readable directory. */
 export function assessRepository(path: string, options: AssessOptions = {}): ApplicationAssessment {
   const root = repositoryRoot(path);
+  const scanner = options.scanner ?? 1;
+  const supported = scanner === 2 ? SUPPORTED_2 : SUPPORTED;
   const configuration: AssessmentConfiguration = {
-    scanner: SCANNER_VERSION,
+    scanner: scanner === 2 ? SCANNER_VERSION_2 : SCANNER_VERSION,
     maxFileBytes: options.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES,
     excludedDirectories: [...(options.excludedDirectories ?? DEFAULT_EXCLUDED_DIRECTORIES)].sort(order),
     maxCallDepth: options.maxCallDepth ?? DEFAULTS.maxCallDepth,
@@ -145,6 +174,8 @@ export function assessRepository(path: string, options: AssessOptions = {}): App
   };
   const goFiles: Array<{ path: string; file: GoFile; test: boolean }> = [];
   const protoFiles: Array<{ path: string; file: ReturnType<typeof parseProto> }> = [];
+  const jsFiles = new Map<string, JsFile>();
+  let jsNotRouting = 0;
   const modules: Array<{ path: string; module: string; dir: string }> = [];
   const manifests: Inventory["manifests"] = [];
   const integrations: Inventory["integrations"] = [];
@@ -223,6 +254,24 @@ export function assessRepository(path: string, options: AssessOptions = {}): App
         analyzed++;
       } catch (error) {
         if (!(error instanceof SourceSyntaxError)) throw error;
+        malformed.push({ path, line: error.line, message: error.message });
+      }
+    } else if (scanner === 2 && (language === "javascript" || language === "typescript")) {
+      if (!JS_ROUTING_EXTENSIONS.has(extension) || NOT_ROUTING_PATH.test(path)) {
+        jsNotRouting++;
+        continue;
+      }
+      const text = read(path);
+      if (text === undefined) continue;
+      if (!ROUTING_HINT.test(text)) {
+        jsNotRouting++;
+        continue;
+      }
+      try {
+        jsFiles.set(path, readJs(tokenize(text)));
+        analyzed++;
+      } catch (error) {
+        if (!(error instanceof JsSyntaxError)) throw error;
         malformed.push({ path, line: error.line, message: error.message });
       }
     }
@@ -748,6 +797,26 @@ export function assessRepository(path: string, options: AssessOptions = {}): App
         questions.push({ id: `q-policy-${id.slice(5)}`, candidate: id, question: `${method.name} is named in a method list (${uniqueSorted(policyReferences.map((e) => evidence.get(e)!.observation.replace(/^.* appears in /, ""))).join(", ")}). What access does that list grant or deny?`, evidence: policyReferences });
     }
   }
+  if (scanner === 2) {
+    const http = httpCandidates(
+      {
+        files: jsFiles,
+        paths: new Set(walk.files.map((f) => f.path)),
+        text: (p) => {
+          try {
+            return readRepositoryFile(root, p);
+          } catch {
+            return undefined;
+          }
+        }
+      },
+      { record, at, evidence }
+    );
+    candidates.push(...http.candidates);
+    findings.push(...http.findings);
+    constructs.httpRoutes += http.routes;
+    unlinkedCount += http.candidates.filter((c) => c.confidence === "unlinked").length;
+  }
   candidates.sort((a, b) => order(a.id, b.id));
 
   // ---- ranking and recommendation ----
@@ -781,7 +850,7 @@ export function assessRepository(path: string, options: AssessOptions = {}): App
   questions.sort((a, b) => order(a.id, b.id));
 
   // ---- coverage and findings ----
-  const languages = [...languageCounts.entries()].sort(([a], [b]) => order(a, b)).map(([language, files]) => ({ language, files, supported: SUPPORTED.has(language) }));
+  const languages = [...languageCounts.entries()].sort(([a], [b]) => order(a, b)).map(([language, files]) => ({ language, files, supported: supported.has(language) }));
   const unsupported = languages.filter((l) => !l.supported);
   skipped.sort((a, b) => order(a.path, b.path) || order(a.reason, b.reason));
   malformed.sort((a, b) => order(a.path, b.path));
@@ -790,6 +859,7 @@ export function assessRepository(path: string, options: AssessOptions = {}): App
     ...(skipped.some((s) => s.reason === "unreadable") ? ["unreadable-files"] : []),
     ...(skipped.some((s) => s.reason === "too-large") ? ["too-large-files"] : []),
     ...(unsupported.length ? ["unsupported-languages"] : []),
+    ...(jsNotRouting ? ["javascript-files-not-routing-code"] : []),
     ...(walk.unsupportedIgnorePatterns.length ? ["unsupported-ignore-patterns"] : []),
     ...(truncatedCount ? ["call-graph-truncated"] : [])
   ];
@@ -798,7 +868,8 @@ export function assessRepository(path: string, options: AssessOptions = {}): App
   for (const s of skipped.filter((s) => s.reason === "symlink")) findings.push({ code: "SYMLINK_SKIPPED", severity: "info", message: `${s.path} is a symbolic link and was not followed`, path: s.path });
   for (const l of unsupported) findings.push({ code: "LANGUAGE_UNSUPPORTED", severity: "info", message: `${l.files} ${l.language} files were counted, not analyzed` });
   for (const p of walk.unsupportedIgnorePatterns) findings.push({ code: "IGNORE_PATTERN_UNSUPPORTED", severity: "info", message: `.gitignore pattern ${JSON.stringify(p)} was not applied` });
-  if (!candidates.length) findings.push({ code: "NO_ENTRY_POINTS", severity: "warning", message: "no supported entry points (Protocol Buffers services) were found" });
+  if (jsNotRouting) findings.push({ code: "JAVASCRIPT_NOT_ANALYZED", severity: "info", message: `${jsNotRouting} JavaScript and TypeScript files were counted, not analyzed: they are markup, tests, declarations, or mention no routing framework this reader knows` });
+  if (!candidates.length) findings.push({ code: "NO_ENTRY_POINTS", severity: "warning", message: scanner === 2 ? "no supported entry points (Protocol Buffers services, or HTTP routes in JavaScript or TypeScript) were found" : "no supported entry points (Protocol Buffers services) were found" });
   if (unlinkedCount) findings.push({ code: "IMPLEMENTATION_UNLINKED", severity: "info", message: `${unlinkedCount} of ${candidates.length} candidates have no linked implementation` });
   if (truncatedCount) findings.push({ code: "CALL_GRAPH_TRUNCATED", severity: "info", message: `${truncatedCount} candidates reached the call-graph limits (depth ${configuration.maxCallDepth}, ${configuration.maxReachableFunctions} functions)` });
   if (candidates.length && !top) findings.push({ code: "NO_EXPOSURE_CANDIDATE", severity: "warning", message: "no candidate satisfies every readiness criterion; nothing is recommended" });
@@ -840,7 +911,7 @@ export function assessRepository(path: string, options: AssessOptions = {}): App
   const name = targetName ?? { name: basename(root), source: "directory" as const };
   const sortedEvidence = [...evidence.values()].sort((a, b) => order(a.location?.path ?? "~", b.location?.path ?? "~") || (a.location?.startLine ?? 0) - (b.location?.startLine ?? 0) || order(a.id, b.id));
   const artifact: Omit<ApplicationAssessment, "digest"> = {
-    format: ASSESSMENT_FORMAT,
+    format: scanner === 2 ? ASSESSMENT_FORMAT_2 : ASSESSMENT_FORMAT,
     assessment: { id: (options.id ?? randomUUID)(), createdAt: (options.now?.() ?? new Date()).toISOString() },
     tool: { name: TOOL_NAME, version: TOOL_VERSION },
     target: { name: name.name, nameSource: name.source, ...identity },
@@ -851,7 +922,7 @@ export function assessRepository(path: string, options: AssessOptions = {}): App
     candidates,
     recommendation,
     findings,
-    limitations: [...LIMITATIONS],
+    limitations: [...limitationsFor(scanner)],
     questions,
     scope: { grantsAuthority: false, verifiesBehavior: false, modifiesTarget: false }
   };

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * `appworks assess <repo> --output <file> [--force] [--strict]`
+ * `appworks assess <repo> --output <file> [--scanner 1|2] [--force] [--strict]`
  * `appworks verify <file> [--repo <repo>]`
  *
  * Exit status (spec/assessment-1.md §10):
@@ -17,7 +17,8 @@ import { TOOL_NAME, TOOL_VERSION, verifyAssessment, type ApplicationAssessment }
 import { RepositoryError, isInside, repositoryRoot } from "./files.js";
 
 const USAGE = `usage:
-  appworks assess <repo> --output <file> [--force] [--strict]
+  appworks assess <repo> --output <file> [--scanner 1|2] [--force] [--strict]
+    --scanner 2 also reads HTTP routes registered in JavaScript and TypeScript and writes appport.application-assessment/2 (default 1)
   appworks verify <file> [--repo <repo>]
   appworks --version`;
 
@@ -73,7 +74,8 @@ export function main(argv: string[], io: CliIO = { out: (t) => process.stdout.wr
       return 0;
     }
     if (command === "assess") {
-      const { positional, options } = parse(rest, ["force", "strict"], ["output"]);
+      const { positional, options } = parse(rest, ["force", "strict"], ["output", "scanner"]);
+      if (options.scanner !== undefined && options.scanner !== "1" && options.scanner !== "2") throw new UsageError("--scanner is 1 or 2");
       if (positional.length !== 1) throw new UsageError("assess takes exactly one repository path");
       if (typeof options.output !== "string") throw new UsageError("assess requires --output <file>");
       let root: string;
@@ -99,7 +101,7 @@ export function main(argv: string[], io: CliIO = { out: (t) => process.stdout.wr
         if (error instanceof UsageError) throw error;
       }
       if (exists && !options.force) throw new UsageError(`${output} exists; pass --force to replace it`);
-      const artifact = assessRepository(root);
+      const artifact = assessRepository(root, { scanner: options.scanner === "2" ? 2 : 1 });
       writeFileSync(output, `${JSON.stringify(artifact, null, 2)}\n`, { flag: options.force ? "w" : "wx" });
       io.out(summary(artifact, output));
       return options.strict && artifact.coverage.partial ? 3 : 0;

@@ -2,7 +2,7 @@
 /**
  * The `appworks` command.
  *
- *   appworks assess <repo> --output <file> [--force] [--strict]          (@appport/assessment)
+ *   appworks assess <repo> --output <file> [--scanner 1|2] [--force] [--strict]   (@appport/assessment)
  *   appworks verify <file> [--repo <repo>]                               (@appport/assessment)
  *   appworks extract <assessment> --candidate <id> --repo <repo> --output <file>
  *                    [--plan <plan.json>] [--verification <results.json>] [--previous <extraction.json>] [--force]
@@ -26,7 +26,7 @@ import { ExtractionRefused, createExtraction, type VerificationResults } from ".
 import { InputError, observeCheckout, readJson, readPlan, verifyExtractionAt } from "./files.js";
 
 const USAGE = `usage:
-  appworks assess <repo> --output <file> [--force] [--strict]
+  appworks assess <repo> --output <file> [--scanner 1|2] [--force] [--strict]
   appworks verify <file> [--repo <repo>]
   appworks extract <assessment> --candidate <id> --repo <repo> --output <file> [--plan <file>] [--verification <file>] [--previous <file>] [--force]
   appworks verify-extraction <file> [--assessment <file>] [--repo <repo>] [--plan-dir <dir>]
