@@ -44,13 +44,15 @@ const target = (dependency: Dependency) => dependency.target as { contract: stri
 export const majorOf = (constraint: string | undefined): number => Number(/\d+/.exec(constraint ?? "1")?.[0] ?? 1);
 
 /** The canonical requirements a recipe declares, as AppPort requirement entries, for registering the runtime as a consumer. */
-export function consumerRequirements(recipe: Pick<RecipeSource, "requires">): RequirementManifestEntry[] {
-  return recipe.requires.map((d) => ({
+export function consumerRequirements(recipe: Pick<RecipeSource, "requires">, extra: Array<{ contract: string; capability: string; version?: number }> = []): RequirementManifestEntry[] {
+  // `extra`: capabilities the runtime itself uses beyond the recipe's dependencies, today the contract's reconciliation lookup (spec §6.5).
+  // Declaring one is the consumer's request; it is used only if the environment also grants it.
+  return [...recipe.requires.map((d) => ({
     name: target(d).capability,
     version: majorOf(d.versionConstraint),
     ...(d.versionConstraint ? { versionConstraint: d.versionConstraint } : {}),
     canonical: { contract: target(d).contract }
-  })) as RequirementManifestEntry[];
+  })), ...extra.map((e) => ({ name: e.capability, version: e.version ?? 1, versionConstraint: String(e.version ?? 1), canonical: { contract: e.contract } }))] as RequirementManifestEntry[];
 }
 
 const failureMessage = (value: unknown): string => (value instanceof Error ? value.message : String(value)).slice(0, 500);

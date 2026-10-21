@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { ConditionalConflictError, createFeltDB, parseFlowSpec, validateFlowSpec, type FlowSpec } from "@feltdb/core";
 import { RuntimeError } from "./model.js";
 
-export type Collection = "RecipeRun" | "StepAttempt" | "Invocation" | "Verification" | "HumanTask" | "RunEvent";
+export type Collection = "RecipeRun" | "StepAttempt" | "Invocation" | "Verification" | "HumanTask" | "Reconciliation" | "RunEvent";
 
 export type Write = { collection: Collection; id: string; value: object } & ({ create: true } | { ifVersion: number });
 

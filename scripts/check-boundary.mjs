@@ -194,7 +194,7 @@ for (const { dir, manifest } of packages) {
   }
 }
 
-for (const file of ["tsconfig.base.json", "tsconfig.build.json", "tsconfig.test.json", "vitest.config.ts", "pnpm-workspace.yaml", ...packages.map((p) => `${p.dir}/tsconfig.json`)]) {
+for (const file of ["tsconfig.base.json", "tsconfig.build.json", "tsconfig.test.json", "vitest.config.ts", "vitest.processes.config.ts", "pnpm-workspace.yaml", ...packages.map((p) => `${p.dir}/tsconfig.json`)]) {
   if (/\.\.\/(?:\.\.\/)*appport\b|\/appport\/packages\//.test(read(file))) fail(`${file} refers to a sibling AppPort checkout`);
 }
 

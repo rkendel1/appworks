@@ -29,9 +29,10 @@ This first slice executes the vertical path the supplier-invoice recipe needs. �
 |---|---|---|
 | `RecipeRun` | run | the exact recipe (`recipe`, `recipeDigest`), the input, the principal, `status`, `outcome`, `currentStep`, step outputs (`data`), lease (`owner`, `leaseExpiresAt`), event counter |
 | `StepAttempt` | step execution (`<run>.<step>`) | `started` → `completed` / `waiting`; the edge taken and the next step |
-| `Invocation` | capability call (`<run>.<step>.<n>`) | purpose `step` or `verification`; idempotency key; input digest; `intent` → `succeeded` / `failed` / `uncertain` / `abandoned`; resolved provider; error |
+| `Invocation` | capability call (`<run>.<step>.<n>`) | purpose `step`, `verification` or `reconciliation`; idempotency key; input digest; `prepared` → `intent` → `succeeded` / `failed` / `uncertain` / `abandoned`; resolved provider; error |
 | `Verification` | verification of one method | step or `outcome`; method id and source (`contract`, `recipe`, `outcome`); `confirmed` / `contradicted` / `inconclusive`; each expectation with expected and actual |
 | `HumanTask` | task step (`<run>.<step>`) | role, what is presented, `pending` → `answered` / `unanswered`; response and who answered |
+| `Reconciliation` | attempt to resolve a lost invocation (`<run>.<step>.<n>`) | the operation key, the resolution (`confirmed-completed`, `confirmed-not-executed`, `indeterminate`), the lookup's evidence, who did it |
 | `RunEvent` | transition (`<run>.<seq>`) | append-only log used by `status` |
 
 Every change to more than one record is one FeltDB transaction. A record that is read and changed is written with `ifVersion`; a new
@@ -51,6 +52,8 @@ A finished run has exactly one **outcome**, the `outcome` of the end step it rea
 | `rejected` | a business rejection (`end` outcome `rejected`); nothing was done that needs reconciling |
 | `failed` | a failure with no effect, or a contradicted verification (§5); the effect is treated as not having happened |
 | `uncertain` | the effect may or may not have happened and was not established. Never success, never retried implicitly. |
+
+`uncertain` is the one terminal state that can be left: reconciliation (§6.5) may reopen a run that finished `uncertain` because a consequential invocation's outcome was lost, and only with evidence. Every other terminal state is final.
 
 A `completed` end whose outcome verification is contradicted finishes `failed`; inconclusive finishes `uncertain`. A run never reports
 `completed` without verification having confirmed it.
@@ -121,8 +124,8 @@ deduplicate; the runtime does not rely on it (§6.3).
 
 ### 6.3 Intent, outcome, and the rule about resubmission
 
-For every invocation: (1) write the `Invocation` in `intent` (a transaction with the step attempt and an event); (2) call the gateway; (3)
-record the outcome. Classification:
+For every invocation: record it as `prepared`, then as `intent`, then call the gateway, then record the outcome (the order and what each
+step proves are below). Classification of the gateway's result:
 
 | Gateway result | Observation step | Consequential step |
 |---|---|---|
@@ -130,16 +133,23 @@ record the outcome. Classification:
 | `denied`, `unresolved`, `rejected` | `failure` edge; effect `none` | `failure` edge; effect `none` |
 | `failed` | `failure` edge (an observation has no effect) | **`uncertain` edge; invocation `uncertain`** |
 
-**Recovery.** If a worker finds, on resuming, a step whose latest `Invocation` is still `intent`, the previous worker died between
-deciding to call and recording the outcome:
+**Three durable steps, in order, before a consequential call.** (1) `prepared`: the invocation, its input and its key are recorded
+together with the step attempt, in one transaction. (2) `intent`: `prepared` becomes `intent`, a write fenced on the invocation and on the
+run's lease (§8). (3) The call is made, and only after (2) has committed. (4) The outcome is recorded. A worker that has lost its lease
+fails at (2), so it can never reach (3).
 
-* observation: the invocation is `abandoned` and a new one (next ordinal, new key) is made; it is safe by definition;
-* consequential: the invocation becomes `uncertain` (`cause: "outcome-not-recorded"`) and the step takes its `uncertain` edge. **The
-  runtime never invokes a consequential capability again for a step whose invocation is `intent` or `uncertain`**, whether by resume,
-  restart, or a second worker. Re-submission is a decision for a person or a separately written recipe step, after the effect has been
-  reconciled (`REINVOKED_AFTER_UNCERTAIN`).
+**Recovery** inspects the step's latest invocation:
 
-If the invocation is already `succeeded` or `failed` when a worker resumes, its recorded outcome is used and nothing is called.
+| Found | What it proves | Recovery |
+|---|---|---|
+| `prepared` | Step (3) never ran: the call is only made after `prepared` has been moved to `intent` and that write committed. **No dispatch occurred.** | dispatch the same invocation: same ordinal, same key, same recorded input |
+| `intent`, observation | the call may have been made; an observation has no effect | `abandoned`; a new invocation (next ordinal, new key) |
+| `intent`, consequential | **nothing.** The intent is written *before* the call, so it cannot show the call was made; the absence of an outcome cannot show it was not. | `uncertain` (`cause: outcome-not-recorded`). **Never invoked again**, by resume, restart or another worker. Resolved only by reconciliation (§6.5) or by a person |
+| `succeeded` / `failed` | the outcome was recorded | use it; call nothing |
+| `uncertain` | already uncertain | take the step's `uncertain` edge; call nothing |
+
+Re-submission is a decision for a person or a separately written recipe step, after the effect has been reconciled
+(`REINVOKED_AFTER_UNCERTAIN`). An expired lease proves nothing about what the earlier worker's provider call did, and never licenses a repeat.
 
 ### 6.4 Verification before success
 
@@ -162,11 +172,42 @@ establish success.
 Verification is *independent* in the sense AppPort defines: it reads application state through the provider's own observation capability,
 not through the response of the call being verified.
 
+### 6.5 Reconciling an uncertain invocation
+
+`reconcile(run, principal)` resolves a run that finished `uncertain` because **one** consequential invocation's outcome was lost, without
+submitting anything. It applies only when that step's `uncertain` edge leads directly to an `end` step (so the run can be reopened
+without replaying steps). It requires `canReconcile` (absent means nobody).
+
+1. **The original operation is identified by its durable key**: the invocation's recorded idempotency key (§6.2), which the provider was given and stored.
+2. **How to look it up is the contract's**, not the recipe's and not the provider's: the canonical contract declares, in the
+   AppWorks-namespaced attribute `org.appworks.reconciliation/1` (a convention of this runtime, not an AppPort or recipe member), the
+   capability to ask (`via`) and the input field for the key (`keyField`), and whether absence is conclusive (`absenceConclusive`). A contract that
+   declares nothing cannot be reconciled by the runtime: a `Reconciliation` of `indeterminate` is recorded and the run stays `uncertain`.
+3. The lookup is an ordinary invocation through the gateway, authorized like any other: the environment must have declared it as a consumer
+   requirement and granted it (`consumerRequirements(recipe, extra)`). It is recorded as an `Invocation` of purpose `reconciliation`.
+4. **Its answer** is `{ state: "recorded", output }` or `{ state: "absent", consistency, fenced }`.
+
+| Lookup says | And | Resolution | Effect on the run |
+|---|---|---|---|
+| `recorded` | `output` matches the step's `expects.output` **and** the step's verification (contract methods and `verify.additional`) confirms the business state, independently, now | `confirmed-completed` | the invocation becomes `succeeded` (`cause: reconciled`), the run reopens at the step's **`success`** edge; outputs and outcome verification run as for any run |
+| `recorded` | the output is malformed, or verification is contradicted or inconclusive | `indeterminate` | none; reason recorded |
+| `absent` | the contract declares `absenceConclusive`, **and** the provider answers `consistency: "strong"` **and** `fenced: true` (it now refuses that key) | `confirmed-not-executed` | the invocation becomes `failed` (`cause: reconciled-not-executed`), the run reopens at the step's **`failure`** edge |
+| `absent` | any of those missing (an eventually consistent store, or no fence) | `indeterminate` | none. An absent row is not evidence of non-execution: the original may still arrive or be invisible |
+| lookup denied, unresolved or failed | | `indeterminate` | none |
+
+Success is never inferred from the invocation record, and non-execution never from an expected row being missing. The transition is
+fenced on the run: of two concurrent reconcilers exactly one changes it (the other gets `CONFLICT` or `NOT_RECONCILABLE`). An
+`indeterminate` attempt is history, not a verdict; the run may be reconciled again.
+
+Not covered: a run uncertain because *verification* was inconclusive after a recorded success (the invocation is `succeeded`, so there is no
+lost invocation to look up); it stays uncertain and is for a person.
+
 ## 7. Authority
 
 * Each invocation, including each verification probe, is resolved and authorized when it is made, by the gateway, through AppPort: resolve
   the canonical requirement, then bind (the binder evaluates the **durable grant** for consumer × provider × capability), then invoke
   (the invoker refuses a stale binding). A grant revoked between two steps is observed by the next step.
+* Authorization is also rechecked before the call that is actually made: a grant revoked between `prepared` and dispatch, or between a crash and its recovery, stops the dispatch (`denied`, effect `none`).
 * A lock, a package, or a claim is never read as permission. The runtime does not cache bindings across invocations.
 * The runtime's **consumer identity** is an AppPort application registered by the host with `requires` matching the recipe's dependencies
   (`consumerRequirements(recipe)`); the principal who started the run is recorded and checked for starting and answering tasks (`Authority`), and is
@@ -175,11 +216,16 @@ not through the response of the call being verified.
 
 ## 8. Driving, leases and restart
 
-A worker `drive`s a run by claiming a lease (`owner`, `leaseExpiresAt`) with a version-fenced write. A run whose lease has not expired is
-`RUN_LEASED` to every other worker. A worker renews its lease at each step boundary. A worker that dies simply stops renewing; after
-`leaseExpiresAt`, `resume(run)` by any worker takes over and continues from `currentStep`, applying §6.3 to a step left mid-flight. A
-worker that is not the holder when it writes loses (`CONFLICT`) and stops. The runtime does not catch its own faults to tidy state: an
-unexpected error leaves the records exactly as they were, as a crash would.
+A worker `drive`s a run by claiming a lease: a version-fenced write that sets `owner` to a **fresh token** (`<worker>/<uuid>`) and
+`leaseExpiresAt`. The token is held in memory by the claiming runtime. A run whose lease has not expired is `RUN_LEASED` to every other
+worker; of several workers claiming together, one claim wins (the others get `CONFLICT`). The holder renews the lease at each transition.
+
+**Every authoritative write is based on a read of the run that still shows the writer's token** (`loadOwned`) **and is fenced on that read's version.**
+Fencing on a version alone is not enough: a worker that wakes after losing its lease would read the *current* version and write over its
+successor. A worker that no longer holds the token stops with `CONFLICT` and writes nothing: it cannot record an outcome, complete a step,
+verify, finish a run, or dispatch. (Verification records are append-only observations and are written only by the holder.) A worker that
+dies stops renewing; after `leaseExpiresAt`, `resume(run)` by any worker takes over and continues from `currentStep`, applying §6.3. The
+runtime does not catch its own faults to tidy state: an unexpected error leaves the records exactly as they were, as a crash would.
 
 ## 9. Human tasks
 
@@ -193,13 +239,20 @@ principal)`:
 4. the run continues.
 
 `expireTask(run, step)` marks the task `unanswered` and takes the recipe's `unanswered` edge. A capability step that names an `approval` task
-runs only if that task is `answered` in this run. This slice offers the API; the CLI shows pending tasks in `status` and offers no answer
-command (§12).
+runs only if that task is `answered` in this run.
+
+Task transitions are checked and atomic: the task record, its step attempt and the run move together in one transaction fenced on the
+task's and the run's versions. A task is closed once: a second answer, an answer after expiry and an expiry after an answer are
+`TASK_NOT_PENDING` (or `CONFLICT` when they race), and exactly one of two racing transitions wins, so task state and run state never disagree. An invalid answer
+does not close the task. Authority is evaluated when the answer is given, so an approver whose authority was withdrawn while the run waited is refused.
+The CLI offers `answer` and `expire`; there is no task UI.
 
 ## 10. CLI
 
 `appworks recipe run <recipe.json> --input <json|@file> --environment <module> [--home <dir>] [--json]`,
-`appworks recipe status <run> [--home <dir>] [--json]`, `appworks recipe resume <run> --environment <module>`. The environment module is
+`appworks recipe status <run> [--home <dir>] [--json]`, `appworks recipe resume <run> --environment <module>`,
+`appworks recipe reconcile <run> --environment <module> [--principal <name>]`, `appworks recipe answer <run> <step> --response <json|@file> --environment <module> [--principal <name>]` and
+`appworks recipe expire <run> <step> --environment <module> [--principal <name>]`. The environment module is
 an operator-supplied ES module whose default export returns `{ gateway, authority? , close? }`; it is the one place that names a
 provider's location and credentials, and is not part of any recipe. Exit status: `0` completed, `10` rejected, `11` failed, `12`
 uncertain, `20` waiting for a task, `2` usage, `1` refused or error.
@@ -212,10 +265,39 @@ correct in general, that the contract is published beyond the registry used, or 
 
 ## 12. Not in this slice (stated, not implied)
 
-* Rules `enum`, `unit`, `encoding`; `preconditions`; event verification; a `transform` with non-trivial rules beyond §5: refused at start (`RECIPE_UNSUPPORTED`).
+* Rules `enum`, `unit`, `encoding`; `preconditions`; event verification: refused at start (`RECIPE_UNSUPPORTED`).
 * Concurrency inside a run (there is none: the recipe has no parallelism), timers and automatic task expiry, notification, assignment to persons.
-* Reconciling an `uncertain` run (reading the effect back and deciding), cancellation, compensation.
+* Cancellation and compensation. Reconciliation (§6.5) covers a single lost consequential invocation whose contract declares a lookup; a run that is uncertain because verification was inconclusive, or whose contract declares no lookup, is for a person.
 * A remote gateway (HTTP transport to providers). `createAppPortGateway` is in-process, over an AppPort registry, and is what the tests use.
-* Recipe locks as a start condition, packages as a source of recipes (Phase 4), a task UI and `recipe answer` (Phase 5), run listing.
+* Recipe locks as a start condition, packages as a source of recipes (Phase 4), a task UI (Phase 5), run listing.
 * Idempotency enforcement by the provider is the provider's; the runtime's guarantee is that it never calls a consequential operation twice for one step.
 * The accounting contract used in tests is the example's illustrative `org.example.accounting`, registered in an AppPort registry; it is not published.
+
+## 13. Crash-boundary and recovery matrix
+
+Every durable transition around a consequential invocation, what survives a process death there, and what recovery does. "Effects" is
+the number of invoices in the accounting ledger's own database, read directly; it is never more than one. Each row is an executable test
+in `test/conformance.test.ts` in which the worker is a separate OS process that kills itself with SIGKILL at that point (rows marked
+*provider* die inside the provider's write).
+
+| # | Boundary | Authoritative records at death | Could the external operation have occurred? | Can the runtime establish that? | Recovery may retry? | Outcome after `resume` | Reconcilable? | Effects |
+|---|---|---|---|---|---|---|---|---|
+| B1 | before run creation | none | no | yes (there is no run) | the caller starts a new run | no run exists | n/a | 0 |
+| B2 | run created, first step not begun | `RecipeRun` (running, at `start`) | no | yes | yes | `completed` | n/a | 1 |
+| B3 | step attempt created, before intent | *not a distinct state*: the attempt and `prepared` are one transaction | n/a | n/a | n/a | see B4a | n/a | n/a |
+| B4a | invocation `prepared`, not yet `intent` | `Invocation(prepared)` with key and input | **no, provably**: the call is made only after `prepared`→`intent` commits | **yes** | **yes**: same invocation, same key | `completed` | n/a | 1 |
+| B4b | `intent` recorded, dispatch not known to have started | `Invocation(intent)` | maybe | **no**: an intent is written before the call and proves nothing | **no** | `uncertain` | yes | 0 (here) |
+| B5, B6 | dispatch begun / provider executing, died before its write committed (*provider*) | `Invocation(intent)` | maybe (here: no) | no | **no** | `uncertain` | yes: lookup answers *absent, strong, fenced* → `confirmed-not-executed`; a late arrival of the key is refused | 0 |
+| B7 | provider committed, died before responding (*provider*) | `Invocation(intent)` | **yes** | no | **no** | `uncertain` | yes: lookup answers *recorded*, verification confirms → `confirmed-completed` | 1 |
+| B8 | response received, outcome not recorded | `Invocation(intent)` | **yes** | no (the response was in memory only) | **no** | `uncertain` | as B7 | 1 |
+| B9 | outcome recorded, step not completed | `Invocation(succeeded, output)` | yes, and recorded | yes | continue; **no call** | `completed` | n/a | 1 |
+| B10 | step completed, next step not begun | `StepAttempt(completed)`, run at next step | yes, recorded | yes | continue | `completed` | n/a | 1 |
+| B11 | verification done, terminal state not committed | `Verification` records | yes, recorded | yes | continue; recorded verifications are reused, not redone | `completed` | n/a | 1 |
+| B12 | immediately after the terminal commit | `RecipeRun(finished)` | yes, recorded | yes | nothing to do | unchanged (`completed`) | n/a | 1 |
+
+Stale and concurrent workers (`test/workers.test.ts`): a worker that returns from the provider after its lease was taken over cannot record
+the outcome (`CONFLICT`; the successor's `uncertain` stands); one parked after recording a success cannot complete the step once another
+worker has; several processes resuming one dead worker's run at once produce one claim, one invocation and one effect; two answers, or an
+answer racing an expiry, produce exactly one transition; a runtime home created by the first release opens under this flow.
+
+The conservative rule is unchanged: where the table says the runtime cannot establish whether the operation occurred, it does not call again.

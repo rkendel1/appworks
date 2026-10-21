@@ -44,10 +44,12 @@ export interface CapabilityGateway {
 export interface RuntimeAuthority {
   canStart(principal: string, recipeId: string): boolean | Promise<boolean>;
   canAnswer(principal: string, role: string): boolean | Promise<boolean>;
+  /** Who may reconcile an uncertain run. Absent means nobody: reconciling is a decision about a possible effect. */
+  canReconcile?(principal: string, recipeId: string): boolean | Promise<boolean>;
 }
 
 /** Permits everything. For local use and tests; a deployment supplies its own. */
-export const permissiveAuthority: RuntimeAuthority = { canStart: () => true, canAnswer: () => true };
+export const permissiveAuthority: RuntimeAuthority = { canStart: () => true, canAnswer: () => true, canReconcile: () => true };
 
 /** A gateway for read-only commands: it reports no environment and refuses every invocation. */
 export const unavailableGateway: CapabilityGateway = {
