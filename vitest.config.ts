@@ -13,6 +13,7 @@ export default defineConfig({
       "@appport/recipe": r("./packages/recipe/src/index.ts"),
       "@appport/recipe-distribution": r("./packages/recipe-distribution/src/index.ts"),
       "@appport/recipe-runtime": r("./packages/recipe-runtime/src/index.ts"),
+      "@appport/recipe-studio": r("./packages/recipe-studio/src/index.ts"),
       "@appport/workspace": r("./packages/workspace/src/index.ts")
     }
   },

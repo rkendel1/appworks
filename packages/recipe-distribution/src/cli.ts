@@ -14,13 +14,13 @@
  * Exit status: 0 done, 1 refused or error (the stage is printed), 2 usage.
  */
 import { mkdirSync, readFileSync, realpathSync, writeFileSync, existsSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { createPrivateKey } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createPublisherDocument, createTrustPolicy, documentIdOf, exportPublicKey, generatePublisherKeypair, signPublisherDocument } from "@distribution-protocol/protocol";
-import { createRecipeLock, createRecipePackage, type RecipeSource } from "@appport/recipe";
+import type { RecipeSource } from "@appport/recipe";
 import { FileChannel, type PublisherEnvelope } from "./channel.js";
-import { publishRecipePackage } from "./publish.js";
+import { packageForPublish, publishRecipePackage } from "./publish.js";
 import { acquireRecipePackage } from "./acquire.js";
 import { InstallStore, installRecipePackage, readInstalledPackage, type InstallEnvironment } from "./install.js";
 
@@ -121,7 +121,7 @@ export async function main(argv: string[], io: CliIO = { out: (t) => process.std
         const loaded = await load();
         // The portable lock pins the contract revisions of the publisher's own environment; it carries no provider and grants nothing.
         const snapshot = await loaded.gateway.snapshot(recipe.requires);
-        const pkg = createRecipePackage(recipe, createRecipeLock(recipe, { contracts: snapshot.contracts ?? {} }), { provenance: { tool: "appworks package publish", source: { path: basename(recipeFile), ...(typeof options["source-revision"] === "string" ? { revision: options["source-revision"] } : {}) } } });
+        const pkg = packageForPublish(recipe, snapshot, { file: recipeFile, ...(typeof options["source-revision"] === "string" ? { revision: options["source-revision"] } : {}) });
         const result = publishRecipePackage({
           channel: new FileChannel(resolve(need(options, "channel"))), package: pkg,
           product: { id: need(options, "product"), name: typeof options["name"] === "string" ? options["name"] : recipe.name, version: need(options, "version") },

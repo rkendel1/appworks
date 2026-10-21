@@ -13,6 +13,7 @@
 | Logical recipe | recipe `id` (reverse-domain) | stable across revisions and releases |
 | Recipe release | Distribution Protocol product release, SemVer | immutable once published; owned by Distribution Protocol |
 | Canonical capability | AppPort contract id, capability, integer major version, `contractDigest`, `capabilityDigest` | owned by AppPort; never SemVer |
+| Studio project | `appworks.recipe-studio/1` (`studio.json`), beside the canonical `recipe.json` | private to `@appport/recipe-studio`: a revision counter, the intended release and the last package's portable lock. The recipe is `recipe.json`, in `appport.recipe/1`; the Studio has no recipe format of its own |
 | Install record | `appworks.recipe-install/1` | a reader accepts exactly this format and refuses any other; written by `@appport/recipe-distribution`, read by `@appport/recipe-runtime` without importing it (`spec/distribution-1.md` §5-§6) |
 | npm packages | `@appport/recipe`, `@appport/recipe-distribution`, `@appport/assessment`, `@appport/extraction` versions | SemVer for the library API and the `appworks` CLI (commands, options, exit statuses), independently of the formats they read. The `appworks` command is `@appport/extraction`'s; `@appport/assessment` alone installs `appworks-assess` (same `assess` and `verify` commands) |
 | Distribution Protocol | `distribution/1` | the adapter pins the protocol version and package version it was written against |

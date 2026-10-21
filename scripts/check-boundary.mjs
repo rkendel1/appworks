@@ -34,6 +34,13 @@
 //    state, opened in src/store.ts only). It never depends on, imports or shares state with @appport/workspace, opens no
 //    process, server or network connection of its own, and contains no code-evaluation primitive. Nothing below it
 //    depends on it. The workspace may reach its CLI through an optional peer dependency, for the `recipe` command only.
+// 10. @appport/recipe-studio (private) authors, validates, previews and packages recipes. It depends at run time only on
+//    @appport/recipe, @appport/protocol, @appport/recipe-runtime (types only: the gateway and authority ports it reads) and
+//    @appport/recipe-distribution (`packageForPublish` only: the function `appworks package publish` builds its package with).
+//    It holds no authority, key, trust policy or execution: its source never grants or revokes, signs, publishes, acquires,
+//    installs or starts a run, never opens a store or depends on Distribution Protocol, AppPort's runtime or FeltDB, and only
+//    src/server.ts serves HTTP. Nothing below it depends on it; the workspace may reach its CLI through an optional peer
+//    dependency, for the `studio` command only.
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -116,6 +123,33 @@ else {
     if (/["']@appport\/(?:workspace|assessment|extraction|recipe-distribution)["']|["']@distribution-protocol\//.test(text)) fail(`${file} imports a package the runtime must not use (workspace, assessment, extraction, distribution)`);
   }
 }
+const studio = byName["@appport/recipe-studio"];
+if (!studio) fail("@appport/recipe-studio is missing");
+else {
+  const allowed = new Set(["@appport/protocol", "@appport/recipe", "@appport/recipe-runtime", "@appport/recipe-distribution"]);
+  for (const [name, spec] of Object.entries({ ...studio.manifest.dependencies, ...studio.manifest.peerDependencies })) {
+    if (!allowed.has(name)) fail(`@appport/recipe-studio depends on ${name}; it may depend only on ${[...allowed].join(", ")}`);
+    if (!byName[name] && !/^\d+\.\d+\.\d+$/.test(spec)) fail(`@appport/recipe-studio depends on ${name}@${spec}; published dependencies are exact versions`);
+  }
+  if (studio.manifest.private !== true) fail("@appport/recipe-studio must be private until its contract is released");
+  const code = (text) => text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  for (const file of walk(`${studio.dir}/src`).filter((f) => f.endsWith(".ts"))) {
+    const text = code(read(file));
+    if (/\beval\s*\(|new\s+Function\s*\(|node:vm\b|child_process/.test(text)) fail(`${file} contains a code-execution primitive or runs a process; the Studio executes nothing`);
+    if (/node:(?:http|https|http2|net|tls|dgram|worker_threads)\b/.test(text.replace(/import type[^;]*;/g, "")) && !file.endsWith("/src/server.ts")) fail(`${file} opens a connection or a server; only src/server.ts serves HTTP`);
+    if (/["']@appport\/(?:core|workspace|assessment|extraction)["']|["']@distribution-protocol\/|["']@feltdb\//.test(text)) fail(`${file} imports a package the Studio must not use (AppPort runtime, workspace, assessment, extraction, Distribution Protocol, FeltDB)`);
+    if (/^\s*(?:import|export)\s+(?!type\b)[^;]*?from\s*["']@appport\/recipe-runtime["']/m.test(text)) fail(`${file} imports a value from @appport/recipe-runtime; the Studio may use its types only (it never executes a recipe)`);
+    for (const m of text.matchAll(/^\s*(?:import|export)\s*\{([^}]*)\}\s*from\s*["']@appport\/recipe-distribution["']/gm)) {
+      const names = m[1].split(",").map((n) => n.trim()).filter(Boolean);
+      if (names.some((n) => n !== "packageForPublish")) fail(`${file} imports ${names.join(", ")} from @appport/recipe-distribution; the Studio may use packageForPublish only (publishing, acquiring and installing are the existing commands')`);
+    }
+    if (/\bsignRelease\b|createPrivateKey|createTrustPolicy|\.grant\(|\.revoke\(|\bRecipeRuntime\b|\.invoke\(|\b(?:acquire|install|publish)RecipePackage\b/.test(text)) fail(`${file} signs, trusts, grants, publishes, installs or runs; the Studio holds no authority and no key, and those are the existing commands'`);
+  }
+}
+for (const lower of ["@appport/assessment", "@appport/extraction", "@appport/recipe", "@appport/recipe-distribution", "@appport/recipe-runtime"]) {
+  const m = byName[lower]?.manifest;
+  if (m && "@appport/recipe-studio" in { ...m.dependencies, ...m.peerDependencies, ...m.devDependencies }) fail(`${lower} depends on @appport/recipe-studio; the Studio consumes them, never the reverse`);
+}
 for (const lower of ["@appport/assessment", "@appport/recipe", "@appport/recipe-distribution"]) {
   const m = byName[lower]?.manifest;
   if (m && "@appport/extraction" in { ...m.dependencies, ...m.peerDependencies, ...m.devDependencies }) fail(`${lower} depends on @appport/extraction; extraction consumes assessments, never the reverse`);
@@ -124,8 +158,8 @@ const workspace = byName["@appport/workspace"];
 if (workspace) {
   const allowed = new Set(["@appport/assessment", "@appport/extraction", "@appport/protocol", "@appport/client", "@appport/github", "@feltdb/core", "@appport/schema", "@anthropic-ai/sdk", "openai"]);
   const providerSdks = { "@anthropic-ai/sdk": "/src/agent/providers/anthropic.ts", openai: "/src/agent/providers/openai.ts" };
-  // The `recipe` and `package` commands are delegated to other packages' CLIs by a lazy import; the workspace has no hard dependency on them.
-  const delegates = ["@appport/recipe-runtime", "@appport/recipe-distribution"];
+  // The `recipe`, `package` and `studio` commands are delegated to other packages' CLIs by a lazy import; the workspace has no hard dependency on them.
+  const delegates = ["@appport/recipe-runtime", "@appport/recipe-distribution", "@appport/recipe-studio"];
   for (const delegated of delegates) {
     if (delegated in { ...workspace.manifest.dependencies }) fail(`@appport/workspace depends on ${delegated}; it may only reach it through an optional peer dependency (a delegated command)`);
     if (delegated in { ...workspace.manifest.peerDependencies } && workspace.manifest.peerDependenciesMeta?.[delegated]?.optional !== true) fail(`@appport/workspace's peer dependency ${delegated} must be optional`);
@@ -152,7 +186,7 @@ if (workspace) {
     for (const [sdk, home] of Object.entries(providerSdks)) if (new RegExp(`from\\s+["']${sdk.replace("/", "\\/")}(?:/[^"']*)?["']`).test(text) && !file.endsWith(home)) fail(`${file} imports ${sdk}; only ${home.slice(1)} (its adapter) may`);
   }
 }
-for (const lower of ["@appport/assessment", "@appport/extraction", "@appport/recipe", "@appport/recipe-distribution", "@appport/recipe-runtime"]) {
+for (const lower of ["@appport/assessment", "@appport/extraction", "@appport/recipe", "@appport/recipe-distribution", "@appport/recipe-runtime", "@appport/recipe-studio"]) {
   const m = byName[lower]?.manifest;
   if (m && "@appport/workspace" in { ...m.dependencies, ...m.peerDependencies, ...m.devDependencies }) fail(`${lower} depends on @appport/workspace; the workspace consumes them, never the reverse`);
 }

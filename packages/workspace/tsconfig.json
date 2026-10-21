@@ -19,6 +19,9 @@
     },
     {
       "path": "../recipe-distribution"
+    },
+    {
+      "path": "../recipe-studio"
     }
   ]
 }

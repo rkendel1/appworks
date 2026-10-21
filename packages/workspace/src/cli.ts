@@ -6,6 +6,7 @@
  *
  *   appworks recipe run|status|resume|reconcile|answer|expire ...   (see @appport/recipe-runtime)
   appworks package keygen|trust|publish|verify|install|list|show ...   (see @appport/recipe-distribution)
+ *   appworks studio serve|new|import|validate|card|package ...   (see @appport/recipe-studio)
   appworks project create --github <owner>/<repo> [--ref <ref>] [--read-credential env:NAME] [--write-credential env:NAME]
  *   appworks project create --git <url-or-mirror> --owner <owner> --name <repo> [--ref <ref>] [--url <canonical url>]
  *   appworks project list [--json]
@@ -226,6 +227,15 @@ export async function main(argv: string[], io: CliIO = { out: (t) => process.std
       return 1;
     }
     return distribution.main(rest, io);
+  }
+  // `studio` (author, validate and package a recipe) belongs to @appport/recipe-studio, reached the same way.
+  if (command === "studio") {
+    const studio = await import("@appport/recipe-studio/cli").catch(() => undefined);
+    if (!studio) {
+      io.err("appworks studio needs @appport/recipe-studio, which is not installed");
+      return 1;
+    }
+    return studio.main(rest, io);
   }
   if (command !== "project" && command !== "serve" && command !== "agent") return extractionMain(argv, io);
   let ws: Workspace | undefined;

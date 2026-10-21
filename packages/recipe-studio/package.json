@@ -1,0 +1,47 @@
+{
+  "name": "@appport/recipe-studio",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AppWorks Recipe Studio: author, validate against a real environment, preview and package an appport.recipe/1 business recipe. Edits the canonical recipe and calls the same validation and packaging as the CLI; holds no schema, authority, signing key or execution of its own.",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rkendel1/appworks.git",
+    "directory": "packages/recipe-studio"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./cli": {
+      "types": "./dist/cli.d.ts",
+      "import": "./dist/cli.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "ui",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "tsc -b --clean"
+  },
+  "bin": {
+    "appworks-studio": "./dist/cli.js"
+  },
+  "dependencies": {
+    "@appport/protocol": "1.2.0",
+    "@appport/recipe": "workspace:*",
+    "@appport/recipe-distribution": "workspace:*",
+    "@appport/recipe-runtime": "workspace:*"
+  }
+}
