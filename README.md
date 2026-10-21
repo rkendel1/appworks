@@ -19,7 +19,7 @@ discoverable and invocable through canonical capability contracts, and uses
 ## Status
 
 **Draft.** This repository contains the recipe source model, its validation, dependency locks, source packages, the boundary with
-Distribution Protocol, the first existing-application assessment (Go and Protocol Buffers), and the first capability extraction
+Distribution Protocol, the first existing-application assessment (Go and Protocol Buffers, and HTTP routes in JavaScript and TypeScript), and the first capability extraction
 (read-only operations, exposed through the application's existing AppPort boundary), and the project workspace that carries a pinned
 revision through them with durable state, approvals and verification. There is **no compiler, no runtime, no publishing or
 acquisition, no source extraction and no migration** yet: nothing here executes a recipe, rewrites an application or establishes a

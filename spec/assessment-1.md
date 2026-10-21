@@ -92,7 +92,8 @@ model is used.
 | `*.go` (§5.2) | imports, top-level functions and methods, structs, interfaces, constants and variables; calls, status codes, SQL literals, goroutines, configuration reads in bodies | everything in §5.2's last paragraph |
 | `go.mod` | module path, direct requirements | replacements, workspaces |
 | `package.json` | package name (target identity) | scripts, dependencies |
-| TypeScript, JavaScript, Python, Java, Kotlin, Ruby, Rust, PHP, C#, Swift, Scala, C, C++, Vue, Svelte, Dart, Elixir | counted per language, reported `LANGUAGE_UNSUPPORTED` | everything |
+| JavaScript, TypeScript (scanner 2 only, §11) | HTTP route registrations on Express, Fastify, Koa router, Hono and NestJS | handler bodies, middleware behavior, routes registered by loops, helpers or reflection |
+| Python, Java, Kotlin, Ruby, Rust, PHP, C#, Swift, Scala, C, C++, Vue, Svelte, Dart, Elixir (and JavaScript or TypeScript under scanner 1) | counted per language, reported `LANGUAGE_UNSUPPORTED` | everything |
 
 A repository with files in an unsupported language, malformed files, unreadable or oversized files, unsupported ignore patterns, or a call
 graph cut by its limits is a **partial** assessment (`coverage.partial`, with `partialReasons`).
@@ -248,8 +249,39 @@ digest. It refuses an output path inside the assessed repository, and an existin
 | 2 | invalid arguments: unknown command or option, missing `--output`, a repository path that is not a directory, an output directory that does not exist, an output inside the repository, or an existing output without `--force` |
 | 3 | `assess --strict`: an assessment was written, but it is partial |
 
-## 11. Not in this version
+## 11. Scanner 2 and `appport.application-assessment/2`: HTTP routes in JavaScript and TypeScript
 
-Automatic extraction, code generation, recipe compilation, execution, migration; HTTP-route discovery for frameworks; languages other than
-Go and Protocol Buffers; runtime observation; any persistence, registry or service. An assessment feeds a person's decision about what to
+Scanner 1 (above) reads Go and Protocol Buffers and writes `/1`. **Scanner 2** (`appport.assessment-scanner/2`, `assessRepository(path, { scanner: 2 })`,
+`appworks assess --scanner 2`) also reads the HTTP routes a JavaScript or TypeScript application registers, and writes `/2`: `/1` plus an
+`http` operation `{ kind, method, path, framework, placeholders }`, the `http-route` entry point, the `route-inline` and
+`route-handler-reference` links and the `js-static` collection method. Scanner 1 output is unchanged byte for byte, so every existing assessment
+(and every extraction that records one's digest) reproduces; a reader refuses a `/1` document that uses anything `/2` adds, and a document whose
+scanner does not match its format. Scanner 2 is chosen explicitly (`assessRepository(path, { scanner: 2 })`, `appworks assess --scanner 2`); the default is scanner 1, and the workspace does not
+select scanner 2 yet, so a workspace project is assessed with scanner 1 (`docs/compatibility.md`).
+
+What is read (`src/js.ts`, `src/http.ts`): a tokenizer (strings, templates, regular expressions, comments) and a recognizer over its tokens.
+Receivers are recognized **by how they are declared** (`express()`, `express.Router()`, `Router()`, `new Router()`, `fastify()`, `new Hono()`,
+including `require('express')()`), so `cache.get('key')` is not a route. Routes are `r.get('/p', …)`, `r.route('/p').get(…).post(…)`, Fastify's
+`route({ method, url, handler })` and NestJS `@Controller` classes. Mounts (`app.use('/api', guard, router)`) are followed across files through
+relative imports and `compilerOptions.paths` of the nearest `jsconfig.json` or `tsconfig.json`, so a route carries every prefix that leads to it.
+A path that is a template or a `+` of strings and names keeps each name as a `{placeholder}` (one candidate per template, never per guessed value);
+any other path is unreadable and reported (`ROUTE_PATH_UNREADABLE`). A file is read only if it mentions a routing framework; the rest of the
+JavaScript and TypeScript files, JSX/TSX markup, tests and declarations are counted and the assessment is partial
+(`javascript-files-not-routing-code`).
+
+What a route establishes is that an entry point exists. **Nothing more is claimed**: the handler body is not read (a reference is followed one
+import to a definition of that name, when there is one); what a middleware enforces is not established (middleware is named, from the route
+and from its mounts); the request and response shapes are unknown unless the route text states them (a path parameter, or what an inline handler
+reads from `req.body`, `req.query` and `req.params`); the proposed effect follows the HTTP method by convention and is *inferred*. Each of these is
+recorded as an `unknown` evidence record. A route is therefore `investigate` at best (`insufficient-evidence` when its handler cannot be located),
+never `exposure-candidate`, and the recommendation is empty. `limitations` gains `http-routes`, `http-handlers` and `http-effect`.
+
+**Extraction does not take an HTTP route.** It needs a contract, an adapter and a behavioral suite for the operation, which this version cannot
+derive for a route; `createExtraction` refuses it with `CANDIDATE_NOT_RPC`, and `select` therefore refuses an HTTP candidate (`CANDIDATE_INELIGIBLE`).
+Assessment makes the surface visible; making a route a capability is still authored work.
+
+## 12. Not in this version
+
+Automatic extraction, code generation, recipe compilation, execution, migration; HTTP-route discovery for other languages (Python, Java, Kotlin,
+Ruby, PHP, C#, Rust) and for routes registered by loops, helpers or reflection; reading handler bodies; runtime observation; any persistence, registry or service. An assessment feeds a person's decision about what to
 expose; it does not make one.
