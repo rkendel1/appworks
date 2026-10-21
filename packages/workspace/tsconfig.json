@@ -16,6 +16,9 @@
     },
     {
       "path": "../recipe-runtime"
+    },
+    {
+      "path": "../recipe-distribution"
     }
   ]
 }

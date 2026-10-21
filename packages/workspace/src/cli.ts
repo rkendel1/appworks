@@ -4,7 +4,8 @@
  * are @appport/extraction's command, unchanged; `project` and `serve` act on the workspace through the same action table
  * (`perform`) and the same project view the web workspace uses. There is one workflow implementation.
  *
- *   appworks recipe run|status|resume ...                     (see @appport/recipe-runtime)
+ *   appworks recipe run|status|resume|reconcile|answer|expire ...   (see @appport/recipe-runtime)
+  appworks package keygen|trust|publish|verify|install|list|show ...   (see @appport/recipe-distribution)
   appworks project create --github <owner>/<repo> [--ref <ref>] [--read-credential env:NAME] [--write-credential env:NAME]
  *   appworks project create --git <url-or-mirror> --owner <owner> --name <repo> [--ref <ref>] [--url <canonical url>]
  *   appworks project list [--json]
@@ -216,6 +217,15 @@ export async function main(argv: string[], io: CliIO = { out: (t) => process.std
       return 1;
     }
     return runtime.main(rest, io);
+  }
+  // `package` (publish, verify, install) belongs to @appport/recipe-distribution, reached the same way.
+  if (command === "package") {
+    const distribution = await import("@appport/recipe-distribution/cli").catch(() => undefined);
+    if (!distribution) {
+      io.err("appworks package needs @appport/recipe-distribution, which is not installed");
+      return 1;
+    }
+    return distribution.main(rest, io);
   }
   if (command !== "project" && command !== "serve" && command !== "agent") return extractionMain(argv, io);
   let ws: Workspace | undefined;

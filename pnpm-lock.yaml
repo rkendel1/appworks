@@ -132,6 +132,9 @@ importers:
         specifier: 7.39.0
         version: 7.39.0(zod@4.6.7)
     devDependencies:
+      '@appport/recipe-distribution':
+        specifier: workspace:*
+        version: link:../recipe-distribution
       '@appport/recipe-runtime':
         specifier: workspace:*
         version: link:../recipe-runtime

@@ -8,6 +8,7 @@ import {
   ApplicationDependencyResolver,
   CapabilityBinder,
   CapabilityInvoker,
+  resolvedDependency,
   type AnyCapability,
   type ApplicationRegistry,
   type ApplicationState,
@@ -23,7 +24,7 @@ import {
   type JsonValue,
   type StateVerification
 } from "@appport/protocol";
-import type { RecipeEnvironment, RecipeSource } from "@appport/recipe";
+import type { RecipeEnvironment, RecipeSource, ResolvedDependencyRecord } from "@appport/recipe";
 import type { CapabilityGateway, GatewayRequest, GatewayResult } from "./gateway.js";
 
 export interface AppPortGatewayOptions {
@@ -71,7 +72,32 @@ export function createAppPortGateway(options: AppPortGatewayOptions): Capability
     return version === undefined ? undefined : { manifest: record.manifest, version };
   }
 
+  const requirementOf = (dependency: Dependency, version: number) => ({
+    name: target(dependency).capability,
+    version,
+    ...(dependency.versionConstraint ? { versionConstraint: dependency.versionConstraint } : {}),
+    canonical: { contract: target(dependency).contract },
+    ...((dependency.target as { provider?: string }).provider ? { provider: { applicationId: (dependency.target as { provider: string }).provider } } : {})
+  });
+
   return {
+    async resolve(requires): Promise<Record<string, ResolvedDependencyRecord>> {
+      const out: Record<string, ResolvedDependencyRecord> = {};
+      const problems: string[] = [];
+      for (const d of requires) {
+        const chosen = await versionOf(d);
+        if (!chosen) {
+          problems.push(`${d.id}: contract ${target(d).contract} has no active version of ${target(d).capability} accepted by ${d.versionConstraint ?? "1"}`);
+          continue;
+        }
+        const result = await resolver().resolveRequirement(requirementOf(d, chosen.version) as never);
+        if (result.kind === "resolved") out[d.id] = resolvedDependency(result) as unknown as ResolvedDependencyRecord;
+        else problems.push(`${d.id}: ${result.kind === "ambiguous" ? "more than one eligible provider" : result.reason}`);
+      }
+      if (problems.length) throw new Error(problems.join("; "));
+      return out;
+    },
+
     async snapshot(requires): Promise<RecipeEnvironment> {
       const contracts: Record<string, AppPortManifest | undefined> = {};
       const providers: Record<string, { eligible: number }> = {};

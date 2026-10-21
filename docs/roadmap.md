@@ -1,7 +1,8 @@
 # AppWorks roadmap
 
-Audited against the source at `47a356e` (main, 2026-10-21). Every status below was checked in code, tests or CI, not taken from
-documentation. Where code and documentation disagree, the code is the record and the disagreement is listed in §2.
+Re-audited on 2026-10-21 against `main` at `7d8df89` plus the distribution slice (PR 4 of the sequence below). Every status was checked in code,
+tests or CI, not taken from documentation. Where code and documentation disagree, the code is the record. The first audit (`47a356e`) is
+summarised in §2.3 so that what changed since is visible.
 
 ## 1. Intent
 
@@ -11,61 +12,41 @@ Two entry points converge on one model of canonical capabilities and immutable p
 * **Path B, existing applications.** Inspect an application, expose its behavior as capabilities, verify them, package them, prepare a safe
   change, **replace the implementation incrementally while the recipe stays unchanged.**
 
-Two end-to-end outcomes drive all prioritization. Everything else is ranked by how directly it advances them.
+Two end-to-end outcomes drive prioritization. Everything else is ranked by how directly it advances them.
 
 * **Outcome A:** a recipe is authored, packaged, acquired in another environment, executed durably, and its business outcome independently verified.
 * **Outcome B:** one real capability of an existing application is replaced, proven contract-equivalent, with the surrounding process unchanged.
 
-## 2. Audit: what is true, what is overstated, what is wrong
+## 2. Where we are
 
-Baseline run: `pnpm build`, `typecheck`, `boundary:check`, `release:check` pass. `pnpm test`: 27 files / 275 tests pass, 3 files / 5 tests
-skipped (see C5). CI on `47a356e`: both jobs (`check`, `memos`) succeed. Three earlier main pushes (`9737baa`, `777984a`, `75c9660`) had a failing `check` job.
+### 2.1 Progress since the first audit
 
-### Confirmed
-
-| Claim | Evidence |
-|---|---|
-| Recipe model, expressions, validation, locks, content-addressed source package | `packages/recipe/src/{source,expression,validate,lock,package}.ts`; 4 test files |
-| No compiler, no runtime | `package.ts:35-37,147,192` refuses kind `compiled`; no execute/interpret code anywhere in `packages/recipe`; `grep -i recipe packages/workspace/src` is empty |
-| Distribution boundary only | `recipe-distribution/src/index.ts`: `recipeReleaseManifest` and `acceptAcquiredRecipePackage`; its own header says "Not here: fetching, registries, publishing, receipts" |
-| Assessment analyzes Go and Protocol Buffers only | `assessment/src/analyze.ts:52-63,204,218`; other languages counted, finding `LANGUAGE_UNSUPPORTED` |
-| Extraction is read-only request/response | `extraction/src/extract.ts:72-74` refuses non-observation, outbound HTTP, async and streaming candidates; `artifact.ts:349` |
-| Workspace workflow, FeltDB state, fenced transactions, leases, resume | `workspace/feltdb.flow`; `store.ts` (`requireAbsent`/`ifVersion`); `spec/workspace-1.md` §1-3; `workflow.test.ts` crash/concurrency cases pass |
-| Web and CLI share one domain | `cli.ts`, `server.ts` both call `Workspace`; `surface.test.ts`, `server.test.ts` |
-| Agent runtime with Anthropic, OpenAI, deterministic, fake adapters; validation, approvals, recovery | `workspace/src/agent/**`; `agent*.test.ts`; the agent cannot approve (no such action) |
-| Contract adoption, promotion artifact, isolated apply, verification with mutants, local commit | `adoption.ts`, `promotion.ts`; `promotion.test.ts` (14 tests pass) |
-| Memos 17/18 then 21/21; failure kept in history | `extractions/memos-reactions/revisions/{1,2}`; CI `pnpm extraction:memos --check --mutations` is green |
-| Deployment not implemented | no deployment code or contract anywhere |
-| Visual Recipe Studio not implemented | the UI (`ui.ts`, `view.ts`, vendored stack-ui) is project/workflow/agent only; no recipe code in the workspace |
-
-### Corrections to the earlier assessment
-
-| # | Earlier statement | Ground truth |
+| PR | What it established | Evidence |
 |---|---|---|
-| C1 | "Push and pull-request submission: not implemented" | **Split.** `pullRequest()` is implemented (`workflow.ts:1356-1378`): approval bound to head+base, idempotent by title adoption, a resumed run never opens a second one, tested in `workflow.test.ts`. **Push is not**: `submit-review`, `push` and `promote` are approved-then-refused `UNSUPPORTED` (`workflow.ts:1346,1387-1400`). Net effect: a PR can only be opened for a branch that already exists on GitHub, and nothing in AppWorks can put it there. `docs/charter.md` still lists "pull requests for a promotion" as not implemented, which is also stale. |
-| C2 | The workflow "discovers, selects, plans and executes an extraction" as a general capability | **It executes only hand-authored, reviewed extraction directories.** `workflow.ts:640-641`: "no reviewed extraction plan exists for X; the workspace does not generate one". `runner.ts:2-3`: "The workspace generates no code". The only directory in `extractions/` is `memos-reactions`. So the plan, adapter, host, behavioral suite and promotion plan for the one demonstrated operation were written by hand. For any other candidate the workflow stops at `plan`. This is the largest gap on Path B and was not named. |
-| C3 | "Install and expose capabilities" described as progress on extraction | The install path (`install.ts`, `surface.ts`) adds a **new AppPort proxy app** whose capabilities each forward to one HTTP route (regex route scan + agent proposals with verified citations). That is exposure, not extraction: no contract mapping, no adapter into the app's boundary, no behavioral verification, no fulfillment claim. It is also independent of the Go/Protobuf-only assessment; keep the two distinct. |
-| C4 | "A CI run for the new main commit could not be established" | It can: run `39530008229` on `47a356e` succeeded in both jobs, including the real-Memos job. |
-| C5 | Memos end-to-end is a proven, reproducible workflow | True in CI only. The default `pnpm test` skips it (`memos-e2e.test.ts` needs `APPWORKS_MEMOS_E2E=1` and a Memos checkout), as it does the Aider run and live-model conformance. The default suite exercises the workflow on a **synthetic notes service with stub runners**. The Memos result also depends on the fork `rkendel1/memos@e0ce856` (bridge pass-through) that is **not merged upstream**. The Aider run (`APPWORKS_AIDER_E2E`) has no recorded result in the repo. |
-| C6 | "Package versions and lockfile reproducibility" implied healthy | `@appport/recipe` and `@appport/recipe-distribution` 0.1.0 are on npm. `@appport/assessment` and `@appport/extraction` return 404, though `docs/compatibility.md` presents all four as released libraries and `release:check` installs the CLI. Either they are unpublished (then the docs overstate) or the registry state is wrong; resolve in Phase 0. |
-| C7 | Gap 6 (Compute) | Not auditable from this repository. Nothing here is Compute-specific; the dev loop works locally (above). Treat as an environment task with its own acceptance, not a product gap. |
+| #10 `feat/recipe-runtime` | Phase 3: durable recipe execution through AppPort, FeltDB state, independent verification, uncertain outcomes never resubmitted, `appworks recipe run/status/resume` | `spec/runtime-1.md`; `packages/recipe-runtime/test/runtime.test.ts` |
+| #11 `feat/recipe-runtime-conformance` | the crash-boundary matrix with real SIGKILLs; a **stale-worker overwrite defect found and fixed** (lease tokens); reconciliation of a lost invocation by durable key; human-task durability | `spec/runtime-1.md` §6.5, §8, §13; `conformance.test.ts`, `workers.test.ts` |
+| #12 `feat/recipe-verification-recovery` | a recorded result with inconclusive verification is recovered by re-verifying, never by invoking; **a latent bug fixed** (an inconclusive finding was reused as a verdict); runs report what the records establish | `spec/runtime-1.md` §3.1, §6.6; `verification.test.ts` |
+| this slice | Phase 4: publish, acquire (verified, with receipts), install and run, across two environments | `spec/distribution-1.md`; `packages/recipe-distribution/test/{lifecycle,e2e,cli}.test.ts` |
 
-### Not previously stated, found in the audit
+`main` has been green in CI on every merge since `47a356e` (`check` and `memos`). Three earlier pushes had been red.
 
-* The workspace is private because `@appport/github` 1.0.2 drags in a second, older AppPort/FeltDB stack (~77 packages): the delivery
-  boundary is blocked on an **upstream** change, not only on AppWorks work (`docs/compatibility.md` §3).
-* No authentication boundary on the web workspace: loopback only, acts as the OS user (`spec/workspace-1.md` §9). Fine for local use, a blocker for any hosted or shared deployment (including Compute).
-* Verification of the promoted Memos copy relies on stub runners in the default suite; real-runner coverage is the CI `memos` job.
+### 2.2 Status ladder
 
-### Status ladder (per capability, at `47a356e`)
-
-Legend: I implemented, U unit-tested, X integration-tested, E end-to-end demonstrated on real services, P production-ready. `-` not yet.
+Legend: I implemented, U unit-tested, X integration-tested against the real adjacent components, E demonstrated end to end on real services
+and state, P production-ready. `-` not yet. "E" for the recipe layers means a real AppPort registry, a real FeltDB, a real signed release and an
+independent persisted ledger, with test providers; no recipe has run against a real third-party application.
 
 | Capability | I | U | X | E | P | Note |
 |---|---|---|---|---|---|---|
-| Recipe model, validation, locks, source package | Y | Y | Y (real `@appport/core` resolution) | - | - | never executed |
-| Distribution acceptance (bytes -> accepted package) | Y | Y | - | - | - | no publish/acquire |
-| Recipe compiler / runtime | - | - | - | - | - | |
+| Recipe model, validation, locks, source package | Y | Y | Y | Y | - | executed by the runtime and distributed |
+| Recipe runtime (subset: `copy`/`const`/`compute`) | Y | Y | Y | Y | - | in-process gateway only; unpublished contract |
+| Crash recovery, reconciliation, verification recovery | Y | Y | Y | Y | - | real process kills; mutation-checked |
+| Publish, acquire, install over a file channel | Y | Y | Y | Y | - | Distribution Protocol 1.0.0, no new dependency |
+| Run from an installed package, in another environment | Y | Y | Y | Y | - | different provider; channel and source deleted first |
+| HTTPS registry, mirrors, upgrade/uninstall, key rotation | - | - | - | - | - | |
+| Recipe compiler | - | - | - | - | - | the runtime interprets source; no compiled kind |
+| Remote capability gateway | - | - | - | - | - | tests are in-process |
+| Published canonical accounting contract | - | - | - | - | - | still the example's illustrative one |
 | Assessment (Go + proto) | Y | Y | Y | Y (Memos) | - | one real app |
 | Route scan + agent-cited proposals | Y | Y | Y | - | - | Aider run unrecorded |
 | Read-only extraction + verification | Y | Y | Y | Y (Memos x1) | - | hand-authored per operation |
@@ -74,18 +55,37 @@ Legend: I implemented, U unit-tested, X integration-tested, E end-to-end demonst
 | Contract adoption, promotion, local commit | Y | Y | Y | Y (Memos) | - | |
 | Open PR | Y | Y | - | - | - | fake provider only |
 | Push, deployment | - | - | - | - | - | |
-| Write extraction, portable implementations, replacement, migration | - | - | - | - | - | |
+| Generated extraction, write extraction, portable implementations, replacement, migration | - | - | - | - | - | **Path B has not moved since the first audit** |
 | Visual Recipe Studio | - | - | - | - | - | |
+
+### 2.3 Findings still open from the first audit
+
+| # | Finding | State |
+|---|---|---|
+| C1 | `pullRequest()` is implemented; **push is not** (`submit-review`, `push`, `promote` are approved-then-refused). A PR can only be opened for a branch already on GitHub. The charter row for PRs is stale | open (Phase 2, blocked on decision 1) |
+| C2 | The workflow executes **only hand-authored, reviewed extraction directories** (`workflow.ts:640-641`: "the workspace does not generate one"); `extractions/` holds one, for Memos. This is the largest gap on Path B | open (Phase 1.1) |
+| C3 | The install/"cited capabilities" path is an AppPort *proxy*, not an extraction: no contract mapping, adapter, behavioral verification or claim | open; keep distinct |
+| C5 | Memos end-to-end is proven in CI only; the default suite uses a synthetic service with stub runners; it depends on the `rkendel1/memos` fork (bridge pass-through) that is not merged upstream; the Aider run has no recorded result | open (0.5) |
+| C6 | `@appport/assessment` and `@appport/extraction` return 404 on npm although `docs/compatibility.md` presents them as released libraries. `@appport/recipe` and `@appport/recipe-distribution` are on npm at 0.1.0; **this slice makes `recipe-distribution` 0.2.0, which is unpublished** (`publish-packages.mjs` skips versions already on the registry, so it will publish it) | open (0.4) |
+| - | No authentication on the web workspace (loopback only) | open (5.6) |
+| - | Branch protection is **off** on `main` (`protected: false`) | open (0.2) |
+
+Resolved since: C4 (CI on the new head is green), the Phase 3 gap, and the "distribution is only a boundary" gap.
 
 ## 3. Roadmap
 
-Order: **0 -> 1 -> (2 and 3 in parallel) -> 4 -> 5 -> 6**. Phases 2 and 3 are independent (different packages, different boundaries) and
-Phase 3 is the first outcome-A proof, so it must not wait on delivery. Each phase ends only when its exit test runs in CI, not on a
-developer machine.
+**Order from here:** the owner's sequence is *runtime conformance (done) -> distribution (done) -> Visual Recipe Studio -> generalized extraction ->
+capability replacement*. This audit's recommendation is to keep that order for **Phase 5** but to start the design of **Phase 1.1 in parallel**, because
+Outcome A is now demonstrated end to end except for authoring, while Outcome B, the harder half of the product, has had no progress and is the longest
+pole. Phase 2 (delivery) waits on a decision that is not engineering (decision 1). Each phase ends only when its exit test runs in CI.
 
 ### Phase 0: Trustworthy baseline (small; start now)
 
 Goal: main is green by construction, the docs say what the code does, and the environment is reproducible.
+
+**Status:** 0.1, 0.2 (`protected: false` on `main`), 0.4, 0.5 and 0.6 are open. 0.3 is partly done: the charter now describes the runtime and
+distribution, and the pull-request row (C1) is corrected in this slice; the npm/compatibility drift (C6) remains. `pnpm test` already runs
+both suites (`test:fast`, `test:processes`) and CI runs it.
 
 | # | Task | Done when |
 |---|---|---|
@@ -126,44 +126,44 @@ hand-written extraction directories, with every failure recorded and recoverable
 Exit: an approved, verified promotion is committed, pushed, and opened as a PR on a real remote, with each transition recorded, and a
 crash injected after each of push and PR-create produces no duplicate.
 
-### Phase 3: Recipe compiler and runtime (the critical path for outcome A)
+### Phase 3: Recipe compiler and runtime: **exit met; one task open**
 
-> **Status (feat/recipe-runtime):** 3.1 (`spec/runtime-1.md`), 3.2, 3.3 (subset: `copy`/`const`/`compute`; others refused), 3.4, 3.5 (API only), 3.6 and
-> 3.8 (`run`/`status`/`resume`; no `answer`) are implemented in `@appport/recipe-runtime` and tested against the supplier-invoice recipe and a
-> persisted test ledger, including the lost-response and crash cases. 3.7 is partial: the provider and fault injection exist, but the contract is
-> still the example's illustrative one, registered only in the test registry, not published. The crash-boundary matrix, stale-worker fencing, reconciliation of a lost invocation and human-task durability are covered by the conformance suite (`spec/runtime-1.md` §13). A recorded result whose verification was inconclusive is recovered by re-verification (`spec/runtime-1.md` §6.6). Still open before the Phase 3 exit: a remote gateway, reconciliation of runs uncertain for other reasons, and a published contract.
+Delivered in #10, #11, #12 (`spec/runtime-1.md`, `packages/recipe-runtime`): the interpreter for the closed vocabulary (rules `copy`/`const`/`compute`; others refused at
+start), invocation through `@appport/core` resolution, binding and durable grants (authorized afresh for every call, including verification
+probes and reconciliation lookups), human tasks (API and `answer`/`expire` CLI), independent verification before `completed`, uncertain outcomes
+that are never resubmitted, reconciliation, verification recovery, lease-token fencing, and a crash-boundary matrix tested with real SIGKILLs.
 
-Design constraints (from the charter and `spec/recipe-1.md`): no embedded code, closed vocabulary, uncertainty never retried
-implicitly, recipes name capabilities not providers, a lock grants nothing. Reuse AppPort resolution/invocation and FeltDB; do **not**
-reuse or fork the transformation workflow in `packages/workspace`.
+The exit test (supplier-invoice against a real test provider: reject, duplicate, auto, approval, rejection, no answer; kill at each boundary;
+independent ledger; a dropped response is `uncertain` and not retried; provider substitution leaves the recipe byte-identical) **runs in CI**.
 
-| # | Task | Notes |
+| # | Open | Notes |
 |---|---|---|
-| 3.1 | Runtime design spec (`spec/runtime-1.md`) before code: instance model, step protocol, effect classes, idempotency keys, uncertain-outcome routing, human-task model, lease/recovery, evidence records. Decide what is shared with the workspace's primitives (leases, fenced writes, approvals) by extracting them into a small internal package rather than copying | review gate |
-| 3.2 | New package `@appport/recipe-runtime` (own `feltdb.flow` for `RecipeRun`, `StepAttempt`, `HumanTask`, `Invocation`, `Verification`) | does not import `@appport/workspace` |
-| 3.3 | Interpreter for the closed vocabulary: typed inputs, expression evaluation, mappings/transformations, branches, outcome routes | the validator in `@appport/recipe` is the only gate; runtime refuses an unvalidated recipe |
-| 3.4 | Capability invocation through `@appport/core` resolution + binding + grants from the lock/environment; record every invocation with its idempotency key | |
-| 3.5 | Human tasks: persist, assign by role, answer/reject/timeout routes; resume after restart | |
-| 3.6 | Verification and recovery: per-operation read-back, independent final-outcome verification, crash at every step boundary resumes without repeating a consequential effect; an indeterminate submit routes to `uncertain`, never success | the key safety property |
-| 3.7 | Real test provider: a small accounting application fulfilling a **real canonical contract** (replace the illustrative `org.example.accounting`) with `find-duplicate`, `submit-invoice`, `get-invoice`, with fault injection (drop the response after commit) | contract must actually be published/registered via AppPort |
-| 3.8 | CLI `appworks recipe run|status|answer|cancel` over the runtime; no UI yet | |
+| 3.7 | Publish the accounting contract (replace the illustrative `org.example.accounting`) | still registered only in the test registry; an ownership decision (decision 3) |
+| 3.9 | A remote gateway (HTTP transport to providers) | the runtime and the install path are written against the `CapabilityGateway` port; only an in-process gateway exists |
+| 3.10 | `enum`/`unit`/`encoding` rules, preconditions, event verification | refused at start, never half-applied |
+| 3.11 | Reconciliation for a run uncertain for a reason other than one lost invocation or one unverified recorded result | for a person today |
 
-Exit (in CI): the supplier-invoice recipe runs against the real test provider; covers validation reject, duplicate reject, auto path,
-approval path, rejection, and no-answer; survives a kill at each step boundary; verifies ledger state independently; a dropped
-submit response yields `uncertain` and is not retried; swapping the provider implementation under the same contract leaves the recipe
-byte-identical and the run passing.
+### Phase 4: Package distribution: **exit met over a file channel; registry work open**
 
-### Phase 4: Package distribution (needs 3)
+Delivered in this slice (`spec/distribution-1.md`): a file release channel; publishing a signed release bound to the publisher's document that never
+changes once published; acquisition that verifies the signature before reading a release, the consumer's *anchored* trust policy, and the signed
+digest before returning any bytes, with a validated Distribution Protocol receipt; installation that validates against the receiving environment,
+resolves *its* providers and writes *its* lock, refuses without verified trust, and authorizes nothing; `appworks package ...`; and
+`appworks recipe run --package`, which re-verifies the installed package against its recorded digest at every start and records it as the run's origin.
 
-| # | Task |
-|---|---|
-| 4.1 | Publish: build package, `recipeReleaseManifest`, sign and publish through Distribution Protocol's own tooling; record provenance (source revision, tool versions) |
-| 4.2 | Acquire: fetch by product identity, run `acceptAcquiredRecipePackage` with a trust policy, write an installation receipt (separate from authorization) |
-| 4.3 | Install into an environment: resolve dependencies through AppPort, create the lock for that environment, refuse on incompatibility |
-| 4.4 | Run from the **acquired** package, never the source checkout |
+The exit test (publish in one environment; a separate environment with a fresh state and a different provider acquires, verifies, installs and executes;
+tampering with any byte, signature or binding is refused at the named stage) **runs in CI**: `e2e.test.ts` deletes the channel and the publisher's
+environment before the run, and `lifecycle.test.ts` is the attack matrix (`spec/distribution-1.md` §9). Mutation-checked: version immutability, the
+install trust gate, trust anchoring and the install-time digest pin each fail tests when removed.
 
-Exit: environment 1 publishes the supplier-invoice package, a separate environment (fresh FeltDB, different provider) acquires,
-verifies, installs and executes it; tampering with any byte, signature or binding is refused at the named stage.
+| # | Open | Notes |
+|---|---|---|
+| 4.5 | An HTTPS registry transport, mirrors, an artifact cache | Distribution Protocol provides them; AppWorks wires only `file` |
+| 4.6 | Upgrade and uninstall; version ranges | a version is named explicitly and the consumer pins the digest |
+| 4.7 | Key rotation and revocation tooling | the trust check honours revocation in a presented lineage; AppWorks cannot yet produce one |
+| 4.8 | A drifted lock refuses a run (`checkRecipeLock` against the live registry at start) | the recipe is validated against the current environment, which is the compatibility gate |
+| 4.9 | Check that the roles human tasks need exist in the environment's authority | recorded in the install record, not checkable by AppWorks |
+| 4.10 | Publish `@appport/recipe-distribution` 0.2.0 | a human action: `pnpm publish:packages` |
 
 ### Phase 5: Visual Recipe Studio (needs 3; 4 for the package action)
 
@@ -201,23 +201,44 @@ same contract digest, and show the Phase 3 recipe that calls it passes unchanged
 
 ## 4. Acceptance projects
 
-1. **Supplier-invoice (outcome A).** Phases 3, 4, 5. The 15-step scenario in the earlier proposal is the acceptance script; steps
-   1-2 and 14-15 additionally depend on 3.7 and 6.6.
-2. **Memos (outcome B, read path).** Keep as a permanent regression: `pnpm extraction:memos --check --mutations` plus
-   `memos-e2e.test.ts`. A passing Memos run does not count toward Phase 1 or 6 exits on its own.
+1. **Supplier-invoice (outcome A).** Status of the 15-step scenario:
+
+| # | Step | State |
+|---|---|---|
+| 1-2 | accounting application with real test capabilities, exposed through AppPort | done (test provider, in-process; contract unpublished) |
+| 3 | assess the application | not done (Phase 1) |
+| 4-5 | define the recipe, validate against canonical contracts | done |
+| 6 | package with immutable identity and provenance | done |
+| 7 | acquire and verify in a separate environment | done |
+| 8 | resolve dependencies through AppPort | done (at install, with the environment's own lock) |
+| 9 | execute with durable state in FeltDB | done |
+| 10 | validation, duplicate, approval, rejection, submission | done |
+| 11 | independently verify the accounting state | done |
+| 12 | interrupt at critical points and recover | done (real process kills) |
+| 13 | an uncertain submission is not silently repeated | done |
+| 14 | change a capability's implementation | done (a second provider with other names) |
+| 15 | recipe unchanged when the contract is unchanged | done for substitution; **not** for a contract revision (no compatibility test across contract versions) |
+
+   What remains for this project is authoring (Phase 5) and a real provider (Phase 6).
+2. **Memos (outcome B, read path).** Permanent regression: `pnpm extraction:memos --check --mutations` plus `memos-e2e.test.ts`. A passing Memos run does not count toward Phase 1 or 6 exits on its own.
 3. **Second application (outcome B, generality).** Phase 1.2 picks it; it must not be Go-and-proto-only by luck of selection.
 
 ## 5. Rules for keeping this honest
 
 * A phase is done when its exit test runs in CI on `main`; a local pass is not done.
 * Every row in the status ladder moves one column at a time and cites the test or run that justifies it.
-* Docs change in the same PR as the behavior (task 0.3 fixes the existing drift).
+* Docs change in the same PR as the behavior.
 * New capability claims in the charter table need a linked test; unknowns stay listed as unknowns.
 * Do not add a second authority, persistence layer or evidence format (charter principle 2): shared primitives are factored out, not copied.
+* **A safety rule is not tested until removing it fails a test.** The runtime and distribution slices were mutation-checked; two real defects (stale-worker overwrite, an inconclusive finding reused as a verdict) and one weak test (a tamper that sometimes did not tamper) were found this way. Keep doing it.
+* Tests that start real processes run alone (`pnpm test:processes`); beside the rest of the suite they starve it of CPU.
 
 ## 6. Open decisions needed from the owner
 
-1. Who owns the push/commit contract: extend `@appport/github` (upstream) or a new provider? Blocks 2.1.
-2. Is the Compute environment expected to run the web workspace for more than one operator? If yes, 5.6 moves ahead of Phase 2.
-3. Which second application for 1.2, and is a non-Go service a hard requirement for Phase 1's exit?
-4. npm: are `@appport/assessment` and `@appport/extraction` meant to be public now (0.4)?
+1. **Push/commit contract (blocks 2.1):** extend `@appport/github` (upstream) or add a sibling provider?
+2. **Hosting (moves 5.6):** is the web workspace, or the Studio, expected to serve more than one operator, or to run in Compute? If yes, authentication comes before Phase 2.
+3. **Contract ownership (3.7):** who publishes the canonical accounting contract, and where? Until then every recipe that names it is runnable only where a test registry holds it.
+4. **Which second application for 1.2**, and is a non-Go service a hard requirement for Phase 1's exit?
+5. **npm (0.4, 4.10):** are `@appport/assessment` and `@appport/extraction` meant to be public now? Publish `@appport/recipe-distribution` 0.2.0?
+6. **Branch protection (0.2):** require `check` and `memos` on `main`? It is a repository setting, not a code change.
+7. **A registry (4.5):** will recipes be distributed through a hosted Distribution Protocol registry, or is a file or mirrored channel enough for the foreseeable consumers?

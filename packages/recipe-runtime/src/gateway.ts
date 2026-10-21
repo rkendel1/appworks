@@ -4,7 +4,7 @@
  * runtime depends on this port; `createAppPortGateway` is the implementation over `@appport/core`.
  */
 import type { Dependency, JsonValue, StateVerification } from "@appport/protocol";
-import type { RecipeEnvironment } from "@appport/recipe";
+import type { RecipeEnvironment, ResolvedDependencyRecord } from "@appport/recipe";
 
 export interface GatewayRequest {
   /** The recipe's declared dependency: its canonical target and version constraint say what to resolve. */
@@ -38,6 +38,11 @@ export interface CapabilityGateway {
   /** What `validateRecipe` needs to check the recipe against this environment: active contracts and eligible providers. */
   snapshot(requires: readonly Dependency[]): Promise<RecipeEnvironment>;
   invoke(request: GatewayRequest): Promise<GatewayResult>;
+  /**
+   * Who resolves each declared dependency in this environment (AppPort `resolvedDependency()` records), for locking a recipe
+   * when it is installed. Rejects, naming each, if a dependency has no provider or more than one. Grants nothing.
+   */
+  resolve?(requires: readonly Dependency[]): Promise<Record<string, ResolvedDependencyRecord>>;
 }
 
 /** Who may start a recipe and answer its tasks. Distinct from the consumer's AppPort grant, which gates each invocation. */

@@ -50,13 +50,18 @@
   },
   "devDependencies": {
     "@appport/sdk": "1.2.2",
-    "@appport/recipe-runtime": "workspace:*"
+    "@appport/recipe-runtime": "workspace:*",
+    "@appport/recipe-distribution": "workspace:*"
   },
   "peerDependencies": {
-    "@appport/recipe-runtime": "workspace:*"
+    "@appport/recipe-runtime": "workspace:*",
+    "@appport/recipe-distribution": "workspace:*"
   },
   "peerDependenciesMeta": {
     "@appport/recipe-runtime": {
+      "optional": true
+    },
+    "@appport/recipe-distribution": {
       "optional": true
     }
   }
