@@ -83,8 +83,16 @@ anything else      ──✗──→ @appport/workspace
    the workflow see the provider-neutral `appworks.agent/1` contract and nothing else, so an adapter (Stack-Agent's, when it has a
    decision-only contract) can replace another without touching them.
 
-`scripts/check-boundary.mjs` enforces 1–4, 6, 7 and 8 on every build (including that `@appport/core` is never a runtime or peer dependency and
-never imported by shipped source). Rule 5 is a review rule.
+9. **The runtime executes through AppPort; it is not the workspace.** `@appport/recipe-runtime` (private) depends at run time on
+   `@appport/recipe`, `@appport/protocol`, `@appport/schema`, `@appport/core` and `@feltdb/core`, and on nothing else of AppWorks's: not
+   `@appport/workspace`, assessment, extraction or distribution. It is the one package allowed to use `@appport/core` at run time,
+   because resolution, authorization binding and invocation are core's and are called afresh for every invocation (`spec/runtime-1.md`
+   §6-§7). Its durable state is its own `feltdb.flow` in FeltDB, opened in `src/store.ts` only. It starts no process, server or
+   connection. The workspace reaches its CLI only by a lazy import through an optional peer dependency (the `recipe` command), and shares
+   no state with it.
+
+`scripts/check-boundary.mjs` enforces 1–4, 6, 7, 8 and 9 on every build (including that `@appport/core` is a runtime dependency of `@appport/recipe-runtime` only,
+and a test-only `devDependency` everywhere else). Rule 5 is a review rule.
 
 ## 4. How the recipe layer uses AppPort
 

@@ -26,7 +26,7 @@ validateRecipe(recipe, {}).findings
 ```
 
 The tests use a contract **test fixture** (`packages/recipe/test/fixtures.ts`) to exercise environment checks, locks and packages. It is not a
-published contract and registers nothing. Nothing here executes: there is no recipe compiler or runtime.
+published contract and registers nothing. The recipe is executed by `@appport/recipe-runtime` in `packages/recipe-runtime/test` against a persisted test ledger (`spec/runtime-1.md`); the contract it runs against is still the illustrative one.
 
 Tests: `packages/recipe/test/validate.test.ts` (the example and focused invalid variants), `lock-package.test.ts`, `schemas.test.ts`,
 and `packages/recipe-distribution/test/boundary.test.ts`.

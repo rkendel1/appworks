@@ -5,6 +5,7 @@
     { "path": "./packages/extraction" },
     { "path": "./packages/recipe" },
     { "path": "./packages/recipe-distribution" },
+    { "path": "./packages/recipe-runtime" },
     { "path": "./packages/workspace" }
   ]
 }

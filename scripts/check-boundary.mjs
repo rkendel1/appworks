@@ -28,6 +28,12 @@
 //    Its agent runtime may also depend on @appport/schema (validating decisions) and on two model providers' SDKs,
 //    @anthropic-ai/sdk and openai, each imported by its own adapter (src/agent/providers/<provider>.ts) and nowhere
 //    else: the orchestrator, the action registry and the workflow know the provider-neutral contract only.
+// 9. @appport/recipe-runtime (private) executes recipes: it depends at run time only on @appport/recipe, the published
+//    AppPort protocol, schema and core packages (core is its gateway to resolution, authorization binding and
+//    invocation, and this is the one package allowed to depend on it at run time) and @feltdb/core (its only durable
+//    state, opened in src/store.ts only). It never depends on, imports or shares state with @appport/workspace, opens no
+//    process, server or network connection of its own, and contains no code-evaluation primitive. Nothing below it
+//    depends on it. The workspace may reach its CLI through an optional peer dependency, for the `recipe` command only.
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -87,6 +93,29 @@ else {
     if (writes.length && !file.endsWith("/src/cli.ts")) fail(`${file} writes to the filesystem (${writes.join(", ")}); only the CLI writes, and only its output file`);
   }
 }
+const runtime = byName["@appport/recipe-runtime"];
+if (!runtime) fail("@appport/recipe-runtime is missing");
+else {
+  const allowed = new Set(["@appport/recipe", "@appport/protocol", "@appport/schema", "@appport/core", "@feltdb/core"]);
+  for (const [name, spec] of Object.entries({ ...runtime.manifest.dependencies, ...runtime.manifest.peerDependencies })) {
+    if (!allowed.has(name)) fail(`@appport/recipe-runtime depends on ${name}; it may depend only on ${[...allowed].join(", ")}`);
+    if (!byName[name] && !/^\d+\.\d+\.\d+$/.test(spec)) fail(`@appport/recipe-runtime depends on ${name}@${spec}; published dependencies are exact versions`);
+  }
+  if (runtime.manifest.private !== true) fail("@appport/recipe-runtime must be private until its contract is released");
+  if (!runtime.manifest.files?.includes("feltdb.flow")) fail("@appport/recipe-runtime must ship its feltdb.flow");
+  try {
+    if (!/^flow_version 1\b/m.test(read(`${runtime.dir}/feltdb.flow`))) fail("packages/recipe-runtime/feltdb.flow is not a flow_version 1 FeltDB flow");
+  } catch {
+    fail("packages/recipe-runtime/feltdb.flow is missing");
+  }
+  for (const file of walk(`${runtime.dir}/src`).filter((f) => f.endsWith(".ts"))) {
+    const text = read(file);
+    if (/\beval\s*\(|new\s+Function\s*\(|node:vm\b/.test(text)) fail(`${file} contains a code-evaluation primitive; recipes are data`);
+    if (/child_process|node:(?:http|https|http2|net|tls|dgram|worker_threads)\b/.test(text.replace(/import type[^;]*;/g, ""))) fail(`${file} runs a process or opens a connection; the runtime reaches providers only through the AppPort gateway`);
+    if (/createFeltDB\(/.test(text) && !file.endsWith("/src/store.ts")) fail(`${file} opens a store; FeltDB is opened in src/store.ts only`);
+    if (/["']@appport\/(?:workspace|assessment|extraction|recipe-distribution)["']|["']@distribution-protocol\//.test(text)) fail(`${file} imports a package the runtime must not use (workspace, assessment, extraction, distribution)`);
+  }
+}
 for (const lower of ["@appport/assessment", "@appport/recipe", "@appport/recipe-distribution"]) {
   const m = byName[lower]?.manifest;
   if (m && "@appport/extraction" in { ...m.dependencies, ...m.peerDependencies, ...m.devDependencies }) fail(`${lower} depends on @appport/extraction; extraction consumes assessments, never the reverse`);
@@ -95,11 +124,16 @@ const workspace = byName["@appport/workspace"];
 if (workspace) {
   const allowed = new Set(["@appport/assessment", "@appport/extraction", "@appport/protocol", "@appport/client", "@appport/github", "@feltdb/core", "@appport/schema", "@anthropic-ai/sdk", "openai"]);
   const providerSdks = { "@anthropic-ai/sdk": "/src/agent/providers/anthropic.ts", openai: "/src/agent/providers/openai.ts" };
+  // The `recipe` command is delegated to the recipe runtime's CLI by a lazy import; the workspace has no hard dependency on it.
+  const delegated = "@appport/recipe-runtime";
+  if (delegated in { ...workspace.manifest.dependencies }) fail(`@appport/workspace depends on ${delegated}; it may only reach it through an optional peer dependency (the \`recipe\` command)`);
+  if (delegated in { ...workspace.manifest.peerDependencies } && workspace.manifest.peerDependenciesMeta?.[delegated]?.optional !== true) fail(`@appport/workspace's peer dependency ${delegated} must be optional`);
   for (const [name, spec] of Object.entries({ ...workspace.manifest.dependencies, ...workspace.manifest.peerDependencies })) {
+    if (name === delegated) continue;
     if (!allowed.has(name)) fail(`@appport/workspace depends on ${name}; it may depend only on ${[...allowed].join(", ")}`);
     if (!byName[name] && !/^\d+\.\d+\.\d+$/.test(spec)) fail(`@appport/workspace depends on ${name}@${spec}; published dependencies are exact versions`);
   }
-  for (const name of Object.keys({ ...workspace.manifest.devDependencies })) if (name !== "@appport/sdk") fail(`@appport/workspace has devDependency ${name}; only @appport/sdk (a real application for discovery tests) is allowed`);
+  for (const name of Object.keys({ ...workspace.manifest.devDependencies })) if (name !== "@appport/sdk" && name !== delegated) fail(`@appport/workspace has devDependency ${name}; only @appport/sdk (a real application for discovery tests) and ${delegated} (the delegated \`recipe\` command) are allowed`);
   if (workspace.manifest.private !== true) fail("@appport/workspace must be private: it is an application, and @appport/github brings a second AppPort stack a published library must not");
   if (!workspace.manifest.files?.includes("feltdb.flow")) fail("@appport/workspace must ship its feltdb.flow");
   try {
@@ -116,7 +150,7 @@ if (workspace) {
     for (const [sdk, home] of Object.entries(providerSdks)) if (new RegExp(`from\\s+["']${sdk.replace("/", "\\/")}(?:/[^"']*)?["']`).test(text) && !file.endsWith(home)) fail(`${file} imports ${sdk}; only ${home.slice(1)} (its adapter) may`);
   }
 }
-for (const lower of ["@appport/assessment", "@appport/extraction", "@appport/recipe", "@appport/recipe-distribution"]) {
+for (const lower of ["@appport/assessment", "@appport/extraction", "@appport/recipe", "@appport/recipe-distribution", "@appport/recipe-runtime"]) {
   const m = byName[lower]?.manifest;
   if (m && "@appport/workspace" in { ...m.dependencies, ...m.peerDependencies, ...m.devDependencies }) fail(`${lower} depends on @appport/workspace; the workspace consumes them, never the reverse`);
 }
@@ -136,9 +170,9 @@ for (const { dir, manifest } of packages) {
     if (APPPORT_UPSTREAM.includes(name) && !/^\d+\.\d+\.\d+$/.test(spec)) fail(`${manifest.name} depends on ${name}@${spec}; AppPort packages are consumed as exact published versions`);
   }
   // The AppPort runtime is a test-only dependency: real resolution and binding in tests, never in what is shipped.
-  const runtime = { ...manifest.dependencies, ...manifest.peerDependencies };
-  if ("@appport/core" in runtime) fail(`${manifest.name} depends on @appport/core at run time; it may only be a devDependency (tests)`);
-  const shipped = { ...runtime };
+  const runtimeDeps = { ...manifest.dependencies, ...manifest.peerDependencies };
+  if ("@appport/core" in runtimeDeps && manifest.name !== "@appport/recipe-runtime") fail(`${manifest.name} depends on @appport/core at run time; it may only be a devDependency (tests); only @appport/recipe-runtime executes through it`);
+  const shipped = { ...runtimeDeps };
   for (const file of walk(`${dir}/src`).filter((f) => f.endsWith(".ts"))) {
     const text = read(file);
     const specifiers = [
