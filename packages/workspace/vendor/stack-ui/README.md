@@ -1,6 +1,6 @@
 # Vendored @stack-ui static build
 
-The shared Stack design system ([rkendel1/stack-ui](https://github.com/rkendel1/stack-ui)), vendored the same way AppPort Services
+The Boundry design foundation (Stack UI) ([rkendel1/stack-ui](https://github.com/rkendel1/stack-ui)), vendored the same way AppPort Services
 and AppBoundry vendor it: the workspace pages are server-delivered HTML with no client build step, and stack-ui is not on npm.
 
 - Every file except this README comes unmodified from `release/stack-ui-static-0.5.0/` of `rkendel1/stack-ui` at

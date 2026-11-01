@@ -20,7 +20,7 @@ const raw = (origin: string, path: string, options: { method?: string; headers?:
 describe("the web workspace", () => {
   it("serves the vendored stack-ui release unmodified, inlined, under a hash-pinned content security policy", async () => {
     const { version, files } = verifyVendoredStackUi();
-    expect(version).toBe("0.5.0");
+    expect(version).toBe("0.6.1");
     expect(Object.keys(files).sort()).toEqual(["core.css", "stack-ui-core-stateless.js", "stack-ui-core.js", "tokens.css"]);
     const ws = await openWorkspace({});
     const server = createWorkspaceServer({ workspace: ws, principal: OPERATOR, port: 0 });
