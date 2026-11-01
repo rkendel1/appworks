@@ -614,8 +614,15 @@
   // ---- Shell ----------------------------------------------------------------------------------------------------
 
   const main = el('div', { class: 'appworks-page' });
+  // The shared theme control: System (the operating system, the default), Light or
+  // Dark. The choice applies to this page only; these pages store nothing.
+  const chooseTheme = (preference) => {
+    if (preference === 'light' || preference === 'dark') document.documentElement.setAttribute('data-stack-theme', preference);
+    else document.documentElement.removeAttribute('data-stack-theme');
+  };
   document.body.prepend(S.dom.Shell({
     product: { name: 'AppWorks', homeHref: '/', mark: 'W' },
+    theme: { preference: 'system', onChange: chooseTheme },
     mainId: 'appworks-main',
     navigation: [
       { id: 'projects', label: 'Projects', href: '/', current: config.page === 'projects' },
