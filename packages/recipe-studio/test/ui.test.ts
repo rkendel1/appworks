@@ -123,3 +123,20 @@ describe("the page, against the real server", () => {
     expect(page.text()).toContain("Add a step from a capability");
   });
 });
+
+describe("design foundation", () => {
+  it("serves the vendored tokens unmodified, before the Studio's own styles, and keeps themes on the foundation", async () => {
+    const { createHash } = await import("node:crypto");
+    const read = (path: string) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
+    const [digest, file] = read("vendor/stack-ui/SHA256SUMS").trim().split(/\s+/);
+    expect(file).toBe("tokens.css");
+    expect(createHash("sha256").update(readFileSync(new URL("../vendor/stack-ui/tokens.css", import.meta.url))).digest("hex")).toBe(digest);
+    const html = read("ui/index.html");
+    expect(html.indexOf("/ui/vendor/tokens.css")).toBeLessThan(html.indexOf("/ui/studio.css"));
+    expect(html).toContain('<select id="theme">');
+    const css = read("ui/studio.css");
+    expect(css).not.toMatch(/--stack-[a-z0-9-]+\s*:/);
+    expect(css).toContain("--bg: var(--stack-color-bg-canvas)");
+    expect(read("ui/studio.js")).not.toMatch(/localStorage|sessionStorage/);
+  });
+});

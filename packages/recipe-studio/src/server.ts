@@ -34,7 +34,9 @@ export interface StudioServerOptions {
 const LOOPBACK = new Set(["127.0.0.1", "::1", "localhost"]);
 const MAX_BODY = 1024 * 1024;
 const UI = new URL("../ui/", import.meta.url);
-const ASSETS: Record<string, { file: string; type: string }> = {
+const ASSETS: Record<string, { file: string; type: string; base?: URL }> = {
+  // The design foundation's tokens (vendor/stack-ui), served before the Studio's own styles.
+  "/ui/vendor/tokens.css": { file: "tokens.css", type: "text/css; charset=utf-8", base: new URL("../vendor/stack-ui/", import.meta.url) },
   "/": { file: "index.html", type: "text/html; charset=utf-8" },
   "/ui/studio.js": { file: "studio.js", type: "text/javascript; charset=utf-8" },
   "/ui/studio.css": { file: "studio.css", type: "text/css; charset=utf-8" }
@@ -162,7 +164,7 @@ export function createStudioServer(options: StudioServerOptions): { server: Serv
         if (req.method === "GET" && ASSETS[url.pathname]) {
           const asset = ASSETS[url.pathname]!;
           res.writeHead(200, { "content-type": asset.type, ...PAGE_HEADERS });
-          return void res.end(readFileSync(fileURLToPath(new URL(asset.file, UI))));
+          return void res.end(readFileSync(fileURLToPath(new URL(asset.file, asset.base ?? UI))));
         }
         if (req.method !== "GET") {
           const fromOrigin = req.headers.origin;

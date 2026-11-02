@@ -1,14 +1,24 @@
-:root { --bg:#fffef5; --fg:#1d2a1d; --line:#4f9a3c; --soft:#eef7e6; --warn:#a15c00; --bad:#a3262a; --ok:#1e6b2e; --mute:#5b665b; font-family: system-ui, sans-serif; }
-@media (prefers-color-scheme: dark) { :root { --bg:#161a14; --fg:#e8efe3; --line:#6cc055; --soft:#212b1d; --warn:#e6a23c; --bad:#ff8a8a; --ok:#7fd48f; --mute:#9aa89a; } }
+:root {
+  /* Colours from the design foundation (vendor/stack-ui tokens.css), which follows the shared theme:
+     the operating system by default, or the header's choice (data-stack-theme). AppWorks keeps its
+     green, darkened where white text sits on it so it stays above 4.5:1. */
+  --bg: var(--stack-color-bg-canvas); --fg: var(--stack-color-text-default); --soft: var(--stack-color-bg-sunken);
+  --warn: var(--stack-color-status-attention-fg); --bad: var(--stack-color-status-critical-fg); --ok: var(--stack-color-status-positive-fg);
+  --mute: var(--stack-color-text-muted);
+  --line: #4f9a3c; --accent: #2e6b22; --on-accent: #ffffff;
+  font-family: var(--stack-font-family-sans);
+}
+@media (prefers-color-scheme: dark) { :root:not([data-stack-theme="light"]) { --line: #6cc055; --accent: #6cc055; --on-accent: #0b1020; } }
+:root[data-stack-theme="dark"] { --line: #6cc055; --accent: #6cc055; --on-accent: #0b1020; }
 body { margin:0; background:var(--bg); color:var(--fg); }
 header { display:flex; gap:12px; align-items:center; flex-wrap:wrap; padding:10px 16px; border-bottom:2px solid var(--line); }
 h1 { font-size:18px; margin:0 12px 0 0; }
 main { padding:16px; max-width:1200px; }
 button, select, input, textarea { font:inherit; color:inherit; background:var(--bg); border:1px solid var(--line); border-radius:4px; padding:4px 8px; }
-button { cursor:pointer; } button.primary { background:var(--line); color:#fff; }
+button { cursor:pointer; } button.primary { background:var(--accent); border-color:var(--accent); color:var(--on-accent); }
 textarea { width:100%; box-sizing:border-box; font-family:ui-monospace,monospace; font-size:12px; }
 #notice { padding:0 16px; min-height:20px; color:var(--mute); } #notice.bad { color:var(--bad); }
-nav.tabs { display:flex; gap:4px; margin-bottom:12px; flex-wrap:wrap; } nav.tabs button.on { background:var(--line); color:#fff; }
+nav.tabs { display:flex; gap:4px; margin-bottom:12px; flex-wrap:wrap; } nav.tabs button.on { background:var(--accent); border-color:var(--accent); color:var(--on-accent); }
 table.card { border-collapse:collapse; border:3px solid var(--line); background:var(--bg); }
 table.card td, table.card th { border:1px solid var(--line); padding:6px 10px; vertical-align:middle; text-align:center; font-size:14px; }
 table.card th { text-align:left; font-size:16px; } table.card td.wide { text-align:center; } table.card td.name { text-align:left; } table.card small { display:block; color:var(--mute); font-size:11px; }
@@ -22,3 +32,7 @@ table.plain { border-collapse:collapse; width:100%; } table.plain td, table.plai
 .mute { color:var(--mute); } code, pre { font-family:ui-monospace,monospace; font-size:12px; } pre { white-space:pre-wrap; word-break:break-all; background:var(--soft); padding:8px; }
 .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:6px 0; }
 .scroll { overflow-x:auto; }
+
+.theme { margin-left:auto; }
+header label { min-width:0; max-width:100%; } header select { max-width:100%; }
+.scroll:focus-visible { outline:var(--stack-focus-ring-width) solid var(--stack-focus-ring-color); outline-offset:var(--stack-focus-ring-offset); }

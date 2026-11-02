@@ -24,6 +24,16 @@ async function api(path, options = {}) {
   return body;
 }
 
+// The shared theme choice for this page (System follows the operating system). Nothing is stored.
+{
+  const theme = $("theme");
+  if (theme) theme.addEventListener("change", () => {
+    const value = theme.value;
+    if (value === "light" || value === "dark") document.documentElement.setAttribute("data-stack-theme", value);
+    else document.documentElement.removeAttribute("data-stack-theme");
+  });
+}
+
 function say(text, bad) { const n = $("notice"); n.textContent = text || ""; n.className = bad ? "bad" : ""; }
 async function guard(fn) { try { say(""); await fn(); } catch (e) { say(e.message, true); } }
 
@@ -72,7 +82,7 @@ const views = {
         if (r > c.from) return null;
         return h("td", { class: `step kind-${c.kind}`, rowspan: c.to - c.from + 1, title: c.step }, c.action, h("small", {}, c.step), c.next.length ? h("small", {}, c.next.map((x) => `${x.label}→${x.target}`).join(" · ")) : null);
       })));
-    body.append(h("div", { class: "scroll" }, h("table", { class: "card" },
+    body.append(h("div", { class: "scroll", tabindex: "0", role: "region", "aria-label": "Recipe card" }, h("table", { class: "card" },
       h("tr", {}, h("th", { colspan: n }, card.title, " ", h("span", { class: "mute" }, `(${card.purpose})`))),
       card.setup.map((s) => h("tr", {}, h("td", { class: "wide", colspan: n }, s))),
       grid,
