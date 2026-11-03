@@ -44,7 +44,7 @@ for (const dir of dirs) {
 }
 const files = readdirSync(tarballs).filter((f) => f.endsWith(".tgz")).map((f) => join(tarballs, f));
 
-// 2. Audit contents: built output, shipped schemas and README only; no sources, tests or unresolved workspace specs.
+// 2. Audit contents: built output, shipped schemas, the README and the changelog only; no sources, tests or unresolved workspace specs.
 for (const file of files) {
   const list = run("tar", ["-tzf", file]).stdout.trim().split("\n");
   const extracted = join(scratch, "audit", file.split(sep).pop());
@@ -53,7 +53,7 @@ for (const file of files) {
   const packed = JSON.parse(readFileSync(join(extracted, "package", "package.json"), "utf8"));
   for (const entry of list) {
     const path = entry.replace(/^package\//, "");
-    if (!/^(dist\/|schemas\/|README\.md$|package\.json$)/.test(path)) problems.push(`${packed.name}: unexpected file ${path}`);
+    if (!/^(dist\/|schemas\/|README\.md$|CHANGELOG\.md$|package\.json$)/.test(path)) problems.push(`${packed.name}: unexpected file ${path}`);
     if (/\.test\.|\/test\/|\/src\//.test(path)) problems.push(`${packed.name}: ships ${path}`);
   }
   if (!list.includes("package/dist/index.js") || !list.includes("package/dist/index.d.ts")) problems.push(`${packed.name}: missing dist/index.js or dist/index.d.ts`);

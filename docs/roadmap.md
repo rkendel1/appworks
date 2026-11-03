@@ -69,7 +69,7 @@ independent persisted ledger, with test providers; no recipe has run against a r
 | C2 | The workflow executes **only hand-authored, reviewed extraction directories** (`workflow.ts:640-641`: "the workspace does not generate one"); `extractions/` holds one, for Memos. This is the largest gap on Path B | open (Phase 1.1) |
 | C3 | The install/"cited capabilities" path is an AppPort *proxy*, not an extraction: no contract mapping, adapter, behavioral verification or claim | open; keep distinct |
 | C5 | Memos end-to-end is proven in CI only; the default suite uses a synthetic service with stub runners; it depends on the `rkendel1/memos` fork (bridge pass-through) that is not merged upstream; the Aider run has no recorded result | open (0.5) |
-| C6 | `@appport/assessment` and `@appport/extraction` return 404 on npm although `docs/compatibility.md` presents them as released libraries. `@appport/recipe` and `@appport/recipe-distribution` are on npm at 0.1.0; **#13 makes `recipe-distribution` 0.2.0, which is unpublished** (`publish-packages.mjs` skips versions already on the registry, so it will publish it) | open (0.4) |
+| C6 | `@appport/assessment` and `@appport/extraction` return 404 on npm although `docs/compatibility.md` presents them as released libraries. `@appport/recipe` and `@appport/recipe-distribution` are on npm at 0.1.0. **Prepared and unpublished** (dependencies refreshed, changelogs added; `pnpm publish:packages --dry-run` lists exactly these four): `recipe` 0.1.1 (dependency refresh, compiled output unchanged), `recipe-distribution` 0.2.0, and first releases of `assessment` 0.1.0 and `extraction` 0.1.0 | open (0.4) |
 | - | No authentication on the web workspace (loopback only) | open (5.6) |
 | - | Branch protection is **off** on `main` (`protected: false`) | open (0.2) |
 
@@ -167,7 +167,7 @@ install trust gate, trust anchoring and the install-time digest pin each fail te
 | 4.7 | Key rotation and revocation tooling | the trust check honours revocation in a presented lineage; AppWorks cannot yet produce one |
 | 4.8 | A drifted lock refuses a run (`checkRecipeLock` against the live registry at start) | the recipe is validated against the current environment, which is the compatibility gate |
 | 4.9 | Check that the roles human tasks need exist in the environment's authority | recorded in the install record, not checkable by AppWorks |
-| 4.10 | Publish `@appport/recipe-distribution` 0.2.0 | a human action: `pnpm publish:packages` |
+| 4.10 | Publish the prepared set: `recipe` 0.1.1, `recipe-distribution` 0.2.0, `assessment` 0.1.0, `extraction` 0.1.0 | a human action: `pnpm publish:packages` (rehearsed with `--dry-run`; `recipe-distribution` pins `recipe` 0.1.1, so they go together) |
 
 ### Phase 5: Visual Recipe Studio: **first slice done; four tasks open**
 
@@ -252,7 +252,7 @@ same contract digest, and show the Phase 3 recipe that calls it passes unchanged
 2. **Hosting (moves 5.6):** is the web workspace, or the Studio, expected to serve more than one operator, or to run in Compute? If yes, authentication comes before Phase 2.
 3. **Contract ownership (3.7):** who publishes the canonical accounting contract, and where? Until then every recipe that names it is runnable only where a test registry holds it.
 4. **Which second application for 1.2**, and is a non-Go service a hard requirement for Phase 1's exit?
-5. **npm (0.4, 4.10):** are `@appport/assessment` and `@appport/extraction` meant to be public now? Publish `@appport/recipe-distribution` 0.2.0?
+5. **npm (0.4, 4.10):** the four public packages are prepared. Are `@appport/assessment` and `@appport/extraction` meant to be public now (they are not `private`, so the publish script will release them for the first time)? All four declare `license: UNLICENSED`: is that the intended license for public packages?
 6. **Branch protection (0.2):** require `check` and `memos` on `main`? It is a repository setting, not a code change.
 7. **A registry (4.5):** will recipes be distributed through a hosted Distribution Protocol registry, or is a file or mirrored channel enough for the foreseeable consumers?
 8. **Provider binding (Phase 5):** should an author be able to say which provider an environment uses, and where does that live? The recipe must stay portable, so

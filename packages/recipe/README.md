@@ -11,9 +11,9 @@ dependency locks (`appport.recipe-lock/1`) and source packages (`appport.recipe-
 | Lock | `createRecipeLock`, `checkRecipeLock`, `portableLock`, `substituteProvider` |
 | Package | `createRecipePackage`, `recipePackageDigest`, `serializeRecipePackage`, `loadRecipePackage`, `recipePackageIdentity`, `recipePackageBinding` |
 
-Depends only on the published `@appport/protocol` 1.2.0, `@appport/schema` 1.1.1 and `@appport/integration` 1.2.0, and uses their
+Depends only on the published `@appport/protocol` 1.3.0, `@appport/schema` 1.1.3 and `@appport/integration` 1.2.2, and uses their
 checks directly: `lintIntegration` for dependencies (canonical targets included), `lintRule` for rules, `compareSchemas` for interfaces.
-Canonical discovery, fulfillment evaluation, resolution and binding are AppPort's (`@appport/core` 1.3.0): resolve with it, then pass the
+Canonical discovery, fulfillment evaluation, resolution and binding are AppPort's (`@appport/core` 1.4.0): resolve with it, then pass the
 `resolvedDependency()` records to `createRecipeLock`.
 
 ```ts

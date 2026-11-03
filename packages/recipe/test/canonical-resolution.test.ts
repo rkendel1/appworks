@@ -1,5 +1,5 @@
 /**
- * Recipe locks and authorization against the real, installed AppPort implementation (`@appport/core` 1.3.0).
+ * Recipe locks and authorization against the real, installed AppPort implementation (`@appport/core` 1.4.0).
  *
  * Every resolution here comes from AppPort's `ApplicationDependencyResolver` and `resolvedDependency()`; every binding from
  * its `CapabilityBinder` and durable authorization grants; every invocation from its `CapabilityInvoker`. No resolution

@@ -48,12 +48,12 @@ Options: `--home <dir>` (`APPWORKS_HOME`, default `~/.appworks`), `--extractions
 
 What it reuses, and what it does not:
 
-* **FeltDB 0.12.0** (`@feltdb/core`): the only durable state, modelled in `feltdb.flow` and deployed with `deployFlowSpec`.
+* **FeltDB 0.18.0** (`@feltdb/core`): the only durable state, modelled in `feltdb.flow` and deployed with `deployFlowSpec`.
 * **`@appport/github` 1.0.2**: ref, repository, branch and commit reads; pull requests. Its own FeltDB is kept in memory; it is not an
   authority for project state. It has no fetch, commit or push contract, so the resolved commit is fetched by SHA with git.
-* **`@appport/client` 1.1.3**: discovery. **`@appport/assessment`, `@appport/extraction`**: assessment, plan validation, verification.
-* **`@anthropic-ai/sdk` 0.135.0, `openai` 7.39.0**: model calls, each in its adapter, SDK retries off, nothing read from the
-  environment by the SDK. **`@appport/schema` 1.1.1**: validating an agent's arguments against each action's schema.
+* **`@appport/client` 1.1.5**: discovery. **`@appport/assessment`, `@appport/extraction`**: assessment, plan validation, verification.
+* **`@anthropic-ai/sdk` 1.4.0, `openai` 7.47.0**: model calls, each in its adapter, SDK retries off, nothing read from the
+  environment by the SDK. **`@appport/schema` 1.1.3**: validating an agent's arguments against each action's schema.
 * **stack-ui 0.5.0**: presentation only, vendored as AppPort Services and AppBoundry vendor it.
 * Not used: `@appport/services` jobs (its stale-lease recovery does not work; see the spec, §10), its secrets (contracts only, no
   implementation: credentials are references resolved from the environment), its API keys (the workspace has no network authentication

@@ -12,11 +12,13 @@ This first slice executes the vertical path the supplier-invoice recipe needs. �
 * **Recipe model.** The source, its validation and its dependency declarations are `@appport/recipe` (`spec/recipe-1.md`). The runtime
   validates with `validateRecipe` and never reads a recipe that fails it. A recipe is data: the runtime interprets a closed vocabulary and
   executes no code from a recipe.
-* **AppPort owns capabilities.** Identity, fulfillment, resolution, authorization binding and invocation are `@appport/core` 1.3.0
+* **AppPort owns capabilities.** Identity, fulfillment, resolution, authorization binding and invocation are `@appport/core` 1.4.0
   (`ApplicationDependencyResolver`, `CapabilityBinder`, `CapabilityInvoker`). The runtime re-implements none of them. The runtime reaches
   AppPort only through the `CapabilityGateway` port (§6), whose AppPort-backed implementation is `createAppPortGateway`.
-* **FeltDB owns state.** `@feltdb/core` 0.12.0 is the only durable authority for runs (§2). `feltdb.flow` of the package is authoritative
-  for the model, as in `spec/workspace-1.md` §1.
+* **FeltDB owns state.** `@feltdb/core` 0.18.0 is the only durable authority for runs (§2). `feltdb.flow` of the package is authoritative
+  for the model, as in `spec/workspace-1.md` §1. The state directory is opened `access: "shared"`: workers, recoverers and a CLI are separate processes over one
+  directory by design, and FeltDB 0.18 otherwise opens a directory exclusively (`STATE_LOCKED`). Each commit stays atomic and serialized; lease tokens and versioned
+  writes (§8) are what keep the processes from overwriting one another.
 * **Not the project workspace.** The runtime does not import `@appport/workspace`, share its FeltDB state, or reuse its transformation
   workflow. It follows the same *discipline* (fenced writes, leases, intent-before-effect) with its own records. Sharing primitives is a
   later refactor, done by extracting a package, never by importing the workspace.

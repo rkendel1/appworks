@@ -43,8 +43,8 @@ environment (AppPort `fulfillment-1` §5); the recipe does not change when an im
 `@appport/recipe` depends only on published AppPort packages, and never on `@appport/core`, Distribution Protocol or a registry. Only
 `@appport/recipe-distribution` depends on Distribution Protocol. AppPort depends on none of these. `scripts/check-boundary.mjs` enforces it.
 
-**AppPort owns canonical validation and resolution.** AppWorks builds on the published `@appport/protocol` 1.2.0, `@appport/schema`
-1.1.1 and `@appport/integration` 1.2.0, and is tested against `@appport/core` 1.3.0. Dependency declarations, including canonical targets,
+**AppPort owns canonical validation and resolution.** AppWorks builds on the published `@appport/protocol` 1.3.0, `@appport/schema`
+1.1.3 and `@appport/integration` 1.2.2, and is tested against `@appport/core` 1.4.0. Dependency declarations, including canonical targets,
 are checked by `lintIntegration`; rules by `lintRule` and `requiredTargetsNotProduced`; interfaces by `compareSchemas`; contracts are
 recognized by `isCanonicalContract`; digests are `contractDigest` and `capabilityDigest`. Discovery, fulfillment evaluation, resolution and
 binding are AppPort's (`discoverCanonical`, `evaluateFulfillment`, `resolveRequirement`, `resolvedDependency()`, `CapabilityBinder`): a
@@ -335,7 +335,7 @@ contract revisions the recipe was checked against (`checkRecipeLock`). 11. Execu
 its own bindings and grants (future). 12. Verify the outcome with the declared verifications (future runtime).
 
 The named functions are those exported by the published `@distribution-protocol/protocol` 1.0.0, which `@appport/recipe-distribution`
-pins. Steps 2 and 10 use AppPort's published canonical discovery, resolution and `resolvedDependency()` (`@appport/core` 1.3.0);
+pins. Steps 2 and 10 use AppPort's published canonical discovery, resolution and `resolvedDependency()` (`@appport/core` 1.4.0);
 `createRecipeLock` takes those records as they are, and the tests build every lock from real resolutions.
 
 ### 7.2 Identities

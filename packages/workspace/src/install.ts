@@ -17,7 +17,7 @@ import type { ProposedCapability } from "./surface.js";
 
 export const INSTALLATION_FORMAT = "appworks.appport-installation/1";
 /** The AppPort SDK the installed application pins: the version this workspace's own tests run discovery against. */
-export const APPPORT_SDK_VERSION = "1.2.2";
+export const APPPORT_SDK_VERSION = "1.4.0";
 /** The AppPort command line, installed beside the SDK so `npx appport` works in the integration directory. */
 export const APPPORT_CLI_VERSION = "1.1.20";
 /** The installed application's server, shipped with the workspace (`templates/appport/server.mjs`). */

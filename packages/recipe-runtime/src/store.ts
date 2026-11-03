@@ -1,5 +1,5 @@
 /**
- * Durable state. FeltDB 0.12.0 is the only authority (spec/runtime-1.md §2). `feltdb.flow` is authoritative for the
+ * Durable state. FeltDB 0.18.0 is the only authority (spec/runtime-1.md §2). `feltdb.flow` is authoritative for the
  * schema: it is deployed when the store opens (a destructive change is refused), and every write is checked against the
  * collection and fields it declares. A change to more than one record is one transaction; a change to an existing
  * record is fenced on the version that was read, a new record on `requireAbsent`.
@@ -53,7 +53,9 @@ export class Store {
     const collections: Record<string, Fields> = {};
     for (const c of spec.collections) collections[c.name] = Object.fromEntries(c.fields.map((f) => [f.name, { type: f.type, optional: f.optional }]));
     // Everything is passed explicitly, so no FELTDB_* variable or feltdb.config.json can redirect the authority.
-    const db = createFeltDB({ namespace: "appworks-recipe-runtime", mode: "local", path: join(home, "state") });
+    // Several processes share one state directory by design (workers, recoverers, a CLI beside a server); lease tokens and versioned writes keep them
+    // safe. FeltDB 0.18 opens a directory exclusively unless told otherwise; `shared` keeps each commit atomic and serialized and lets the others in.
+    const db = createFeltDB({ namespace: "appworks-recipe-runtime", mode: "local", path: join(home, "state"), access: "shared" });
     const store = new Store(db, home, spec, collections);
     try {
       const deployed = (await db.collection("_flow_apps").get(spec.app)) as { version: number; spec?: FlowSpec; status?: string } | null;

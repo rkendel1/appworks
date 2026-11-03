@@ -37,5 +37,5 @@ It reads JSON and files and executes nothing: it never runs, imports or loads an
 An extraction grants no authority, is not executable, establishes no equivalence beyond the behaviors recorded as passed, modifies
 nothing and deploys nothing. Read-only request/response operations only.
 
-Runtime dependencies are `@appport/protocol` 1.2.0, `@appport/schema` 1.1.1 and `@appport/assessment`. It does not depend on
+Runtime dependencies are `@appport/protocol` 1.3.0, `@appport/schema` 1.1.3 and `@appport/assessment`. It does not depend on
 `@appport/core`, `@appport/sdk` or Distribution Protocol. Adapters live in private packages under `extractions/`.
