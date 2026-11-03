@@ -1,10 +1,12 @@
 import { createApplication, createServer, defineCapability, permissionAuthorizer, s } from "@appport/sdk";
 import { serve } from "@appport/sdk/node";
-import { claimFor, fulfillmentAttributes, type AppPortManifest } from "@appport/protocol";
+import { claimFor, type AppPortManifest } from "@appport/protocol";
 
 /** A real AppPort application, served over HTTP with public discovery, that counts invocations. */
 export async function application(options: { claimAgainst?: AppPortManifest } = {}) {
   let invoked = 0;
+  // AppPort 1.4 reserves the application attribute `appport.fulfillment/1`: a claim is declared on the capability it is made for (`fulfills`).
+  const claim = options.claimAgainst ? claimFor(options.claimAgainst, "note.get", 1) : undefined;
   const get = defineCapability({
     name: "note.get",
     version: 1,
@@ -13,13 +15,13 @@ export async function application(options: { claimAgainst?: AppPortManifest } = 
     output: s.object({ name: s.string(), body: s.string() }),
     effect: "observation",
     authorization: ["notes.read"],
+    ...(claim ? { fulfills: [claim] } : {}),
     handler: async ({ name }: { name: string }) => {
       invoked++;
       return { name, body: "" };
     }
-  });
-  const declaration = options.claimAgainst ? fulfillmentAttributes({ capabilities: { "note.get@1": [claimFor(options.claimAgainst, "note.get", 1)] } }) : undefined;
-  const app = createApplication({ application: { id: "com.example.notes", name: "Notes", version: "1.0.0" }, capabilities: [get], authorizer: permissionAuthorizer(), ...(declaration ? { extensions: declaration.extensions, attributes: declaration.attributes } : {}) } as never);
+  } as never);
+  const app = createApplication({ application: { id: "com.example.notes", name: "Notes", version: "1.0.0" }, capabilities: [get], authorizer: permissionAuthorizer() });
   const server = createServer({ application: app, publication: { public: true, applicationDescription: true, capabilities: [{ name: "note.get", version: 1 }] } } as never);
   const running = await serve({ server, host: "127.0.0.1", port: 0, websocket: false } as never);
   const url = (running as { url: string }).url.replace(/\/$/, "");

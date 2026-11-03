@@ -1,5 +1,5 @@
 /**
- * Durable state. FeltDB 0.12.0 is the only authority for project identity, revision, runs, inventory, decisions, stage
+ * Durable state. FeltDB 0.18.0 is the only authority for project identity, revision, runs, inventory, decisions, stage
  * history, artifact and verification references, approvals and promotion status. Every change that touches more than
  * one record is one FeltDB transaction, and every change to an existing record is fenced on the version that was read,
  * so two writers can never both win. Artifact bodies (assessments run to megabytes) are content-addressed files under
@@ -45,7 +45,9 @@ export class Store {
   static async open(home: string): Promise<Store> {
     mkdirSync(join(home, "artifacts"), { recursive: true });
     // Everything is passed explicitly, so no FELTDB_* variable or feltdb.config.json can redirect the authority.
-    const db = createFeltDB({ namespace: "appworks-workspace", mode: "local", path: join(home, "state") });
+    // The CLI, the web server and a resumed run are separate processes over one state directory. FeltDB 0.18 opens a directory exclusively unless told
+    // otherwise; `shared` keeps each commit atomic and serialized and lets the others in.
+    const db = createFeltDB({ namespace: "appworks-workspace", mode: "local", path: join(home, "state"), access: "shared" });
     const store = new Store(db, home);
     try {
       await store.deploy();

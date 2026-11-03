@@ -40,7 +40,8 @@ export class Ledger {
   private constructor(private readonly db: ReturnType<typeof createFeltDB>) {}
 
   static open(path: string): Ledger {
-    return new Ledger(createFeltDB({ namespace: "ledger", mode: "local", path }));
+    // The ledger is the independent oracle: the test process and every worker process open it at once. FeltDB 0.18 opens a directory exclusively unless told otherwise.
+    return new Ledger(createFeltDB({ namespace: "ledger", mode: "local", path, access: "shared" }));
   }
 
   close(): Promise<void> {

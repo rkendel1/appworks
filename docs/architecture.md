@@ -55,8 +55,8 @@ anything else      ──✗──→ @appport/workspace
 1. **AppWorks depends on AppPort; AppPort does not depend on AppWorks.** AppWorks consumes AppPort's **published** packages at exact versions,
    so it builds, tests and installs without an AppPort checkout. No `workspace:`, `link:`, `file:` or git dependency on an AppPort package,
    and no import, path alias or project reference into a sibling checkout.
-2. **`@appport/recipe` depends only on `@appport/protocol` 1.2.0, `@appport/schema` 1.1.1 and `@appport/integration` 1.2.0 at run time.**
-   It builds locks from `@appport/core`'s `resolvedDependency()` records, which the caller resolved. `@appport/core` 1.3.0 is a
+2. **`@appport/recipe` depends only on `@appport/protocol` 1.3.0, `@appport/schema` 1.1.3 and `@appport/integration` 1.2.2 at run time.**
+   It builds locks from `@appport/core`'s `resolvedDependency()` records, which the caller resolved. `@appport/core` 1.4.0 is a
    devDependency, so its tests run against real resolution and binding, and no shipped source imports it.
 3. **Only `@appport/recipe-distribution` depends on Distribution Protocol.** The recipe model, validation, locks and package format work with
    no distribution layer and no registry.
@@ -74,7 +74,7 @@ anything else      ──✗──→ @appport/workspace
    `verifyAssessment`), and has no code-execution or network primitive; only its CLI writes, and only its output. Adapters are
    application-specific code in private packages under `extractions/`, run only by their own verification suites.
 
-8. **The workspace orchestrates; it does not re-implement.** `@appport/workspace` keeps all durable state in FeltDB 0.12.0, modelled
+8. **The workspace orchestrates; it does not re-implement.** `@appport/workspace` keeps all durable state in FeltDB 0.18.0, modelled
    by its `feltdb.flow` (deployed, and enforced on every write). It resolves repositories through `@appport/github`, discovers through
    `@appport/client`, assesses, validates plans and verifies through `@appport/assessment` and `@appport/extraction`, and runs only the
    reviewed extraction runner, after an approval, and, after its own approval, an AppPort integration it installed (packages installed
@@ -151,7 +151,7 @@ after, and stops otherwise. Discovery uses AppPort's client (`appport.manifest`)
 
 | The workspace needs | It uses |
 |---|---|
-| Durable state, schema, concurrency | FeltDB 0.12.0: `deployFlowSpec` of `feltdb.flow`, `transaction` with `requireAbsent` / `ifVersion`, `updateIfVersion`, indexes |
+| Durable state, schema, concurrency | FeltDB 0.18.0: `deployFlowSpec` of `feltdb.flow`, `transaction` with `requireAbsent` / `ifVersion`, `updateIfVersion`, indexes |
 | Repository refs, branches, commits, pull requests | `@appport/github` 1.0.2 (`repositories.get/source`, `branches.get`, `commits.list`, `pullRequests.list/create`), capabilities decided by the workspace authority |
 | The commit's files | git, by SHA, into an isolated checkout (no `@appport/github` contract exists for it) |
 | Existing capabilities | `@appport/client` `discoverApplication`; claims through `@appport/protocol` `claimsFor` and `evaluateFulfillment` |

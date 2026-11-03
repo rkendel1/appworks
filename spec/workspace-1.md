@@ -7,9 +7,10 @@ and the boundaries it enforces. The code is in `packages/workspace`; the durable
 
 ## 1. Authority and state
 
-* **FeltDB 0.12.0 is the only durable authority.** Project identity and pinned revision, runs, inventory, decisions, stage history,
+* **FeltDB 0.18.0 is the only durable authority.** Project identity and pinned revision, runs, inventory, decisions, stage history,
   artifact and verification references (with digests), approvals and promotion status are FeltDB records. No other copy is authoritative:
-  not process memory, not a JSON file, not a job record, not another database.
+  not process memory, not a JSON file, not a job record, not another database. The state directory is opened `access: "shared"`: the CLI, the web server and a resumed
+  run are separate processes over one directory, and FeltDB 0.18 otherwise opens a directory exclusively (`STATE_LOCKED`); each commit stays atomic and serialized.
 * **`feltdb.flow` is authoritative for the model.** The workspace parses it with FeltDB's `parseFlowSpec`, validates it with
   `validateFlowSpec`, deploys it with `deployFlowSpec` when it opens a home (a destructive change is refused, never applied), creates the
   indexes it declares, and derives its stages, steps, evidence slots and approval actions from it. It refuses to write any record that
@@ -347,5 +348,5 @@ supported are ref, repository, branch and commit reads (acquisition) and opening
 supported, and refused rather than simulated: fetching content (the workspace fetches the resolved commit with git), comparing
 revisions, fork parentage, creating commits and pushing. A safe remote promotion needs, at minimum, `repositories.compare`, the
 repository's `parent`, and a commit-and-push operation (or the git data API) under its write capability; those need a release of
-`@appport/github`, which should also move it to the current AppPort stack (`@appport/protocol` 1.2.0) and FeltDB, removing the second
+`@appport/github`, which should also move it to the current AppPort stack (`@appport/protocol` 1.3.0) and FeltDB, removing the second
 stack it brings today.

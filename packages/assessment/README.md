@@ -42,5 +42,5 @@ Scanner 1 is the default and its output is unchanged, so existing digests still 
 **Guarantees:** it never writes to, executes, builds or imports anything in the target; it never follows symbolic links; it uses no network
 and no language model. Every observed fact has a location you can check; every inference names its basis; what it cannot determine is
 recorded as unknown. It never claims verified behavior, grants no authority, registers nothing, and its proposed capability is not a
-contract. Depends only on `@appport/protocol` 1.2.0. Part of the AppPort ecosystem, not of the AppPort protocol. Not implemented:
+contract. Depends only on `@appport/protocol` 1.3.0. Part of the AppPort ecosystem, not of the AppPort protocol. Not implemented:
 extraction, compilation, execution and migration.

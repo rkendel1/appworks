@@ -27,14 +27,15 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "tsc -b",
     "clean": "tsc -b --clean"
   },
   "dependencies": {
-    "@appport/recipe": "workspace:0.1.0",
+    "@appport/recipe": "workspace:0.1.1",
     "@distribution-protocol/protocol": "1.0.0"
   },
   "bin": {

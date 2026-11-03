@@ -39,7 +39,7 @@
     "appworks-studio": "./dist/cli.js"
   },
   "dependencies": {
-    "@appport/protocol": "1.2.0",
+    "@appport/protocol": "1.3.0",
     "@appport/recipe": "workspace:*",
     "@appport/recipe-distribution": "workspace:*",
     "@appport/recipe-runtime": "workspace:*"
